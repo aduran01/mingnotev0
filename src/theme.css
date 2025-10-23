@@ -1,0 +1,112 @@
+/* ===== PASTEL KAWAII THEME ===== */
+:root {
+  /* Palette */
+  --bg: #fffafc;              /* warm white with pink tint */
+  --fg: #111;              /* soft plum text */
+  --muted: #a18aaa;           /* lavender-gray */
+  --accent: #f9a8d4;          /* sakura pink */
+  --accent-2: #a5f3fc;        /* sky aqua */
+  --accent-3: #fef9c3;        /* pastel yellow */
+  --accent-fg: #4b4453;
+
+  /* Surfaces */
+  --chrome: #ffeef7;          /* soft pink header/sidebar */
+  --card: #fffafc;
+  --border: #f8c8dc;          /* pale pink border */
+  --shadow: 0 2px 6px rgba(249, 168, 212, 0.3);
+
+  /* Typography & radius */
+  --font-sans: "Quicksand", "Poppins", "Nunito", ui-sans-serif;
+  --font-mono: "Fira Code", "JetBrains Mono", monospace;
+  --text-size: 17px;
+  --line: 1.7;
+  --radius: 14px;
+}
+
+
+
+html, body, #root, .app-shell {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-size);
+  letter-spacing: 0.1px;
+}
+
+/* Header */
+header {
+  background: var(--chrome);
+  box-shadow: var(--shadow);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Buttons */
+button {
+  appearance: none;
+  border: 2px solid var(--border);
+  background: var(--accent-3);
+  color: var(--fg);
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+button:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(249, 168, 212, 0.4);
+}
+button:focus-visible {
+  outline: 3px dashed var(--accent-2);
+  outline-offset: 3px;
+}
+
+/* Sidebar */
+aside {
+  background: var(--chrome);
+  border-right: 1px solid var(--border);
+  box-shadow: inset -2px 0 3px rgba(255, 182, 193, 0.1);
+}
+
+/* Editor */
+.card {
+  background: var(--card);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius);
+  transition: background 0.3s ease;
+}
+
+textarea.editor {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  padding: 28px;
+  line-height: var(--line);
+  background: transparent;
+  color: inherit;
+  border: none;
+  outline: none;
+  width: 100%;
+  height: 100%;
+  resize: none;
+}
+
+/* Scrollbars */
+* { scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { height: 10px; width: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 10px;
+  border: 2px solid var(--bg);
+}
+
+/* Links / highlights */
+a { color: var(--accent); }
+::selection { background: var(--accent-2); color: var(--fg); }
+
+/* Gentle fade animations */
+button, textarea, header, aside {
+  transition: background 0.2s ease, color 0.2s ease;
+}
