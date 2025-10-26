@@ -10,50 +10,91 @@ import { listTree, newDoc, newFolder } from "../../lib/ipc";
 type Folder = { id: string; name: string; parentId: string | null };
 type Doc    = { id: string; title: string; folderId: string | null };
 
+/**
+ * A discriminated union of possible tree nodes. Folders can have children,
+ * whereas docs are leaf nodes.
+ */
 type TreeNode =
   | { kind: "folder"; id: string; name: string; children: TreeNode[] }
   | { kind: "doc"; id: string; title: string };
 
+/**
+ * Tree component renders a nested list of folders and documents. It supports
+ * creating new folders and documents at any level, expanding and collapsing
+ * folders, and keeps the global store in sync.
+ */
 export default function Tree() {
-  const s = useSnapshot(state);
+  // Subscribe to global state to re-render when projectPath or selected doc changes
+  const snapshot = useSnapshot(state);
+  // local copies of folder and doc arrays fetched from the backend
   const [folders, setFolders] = useState<Folder[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
+  // track which folders are expanded in the UI
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
+  /**
+   * Refresh the folder/doc lists from the current project path.
+   * Also keep the global state in sync so other components can react.
+   */
   const refresh = useCallback(async () => {
     if (!state.projectPath) return;
     const { folders: f, docs: d } = await listTree(state.projectPath);
-    // keep both local and global in sync
+    // update local lists
     setFolders(f);
     setDocs(d);
+    // propagate to global state
     state.folders = f;
     state.docs = d;
   }, []);
 
-  // initial + on project change
+  // Whenever the projectPath changes, re-fetch the tree.
   useEffect(() => {
-    if (s.projectPath) refresh();
-  }, [s.projectPath, refresh]);
+    if (snapshot.projectPath) {
+      refresh();
+    }
+  }, [snapshot.projectPath, refresh]);
 
+  // Build a nested tree for rendering from the flat lists.
   const rootNodes = useMemo<TreeNode[]>(() => buildTree(folders, docs), [folders, docs]);
 
+  // Toggle expand/collapse state for a folder
   const toggle = (id: string) =>
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
+  /**
+   * Create a new folder. If parentId is null, the folder will be at the root.
+   * Expands the parent folder so the new child is visible.
+   */
   const createFolder = async (parentId: string | null) => {
-    if (!state.projectPath) return;
+    // Require a project to be open before adding folders
+    if (!state.projectPath) {
+      alert("Please create or open a project first.");
+      return;
+    }
     const name = prompt("New folder name?") || "New Folder";
     await newFolder(state.projectPath, name, parentId);
     await refresh();
+    // expand the parent so the new folder appears
     if (parentId) setExpanded((e) => ({ ...e, [parentId]: true }));
   };
 
+  /**
+   * Create a new document. If folderId is null, the doc will be at the root.
+   * Sets the currentDocId so the editor loads the new doc,
+   * and expands the parent folder so the new doc is visible.
+   */
   const createDoc = async (folderId: string | null) => {
-    if (!state.projectPath) return;
+    // Require a project to be open before adding documents
+    if (!state.projectPath) {
+      alert("Please create or open a project first.");
+      return;
+    }
     const title = prompt("New document title?") || "Untitled";
     const id = await newDoc(state.projectPath, title, folderId);
     await refresh();
+    // set the doc as current for editing
     state.currentDocId = id;
+    // expand the parent so the new doc appears
     if (folderId) setExpanded((e) => ({ ...e, [folderId]: true }));
   };
 
@@ -61,8 +102,21 @@ export default function Tree() {
     <div style={{ padding: 12 }}>
       {/* Root-level actions */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button onClick={() => createDoc(null)}>+ Doc</button>
-        <button onClick={() => createFolder(null)}>+ Folder</button>
+        {/* Disable root-level actions when no project is open */}
+        <button
+          onClick={() => createDoc(null)}
+          disabled={!snapshot.projectPath}
+          title={snapshot.projectPath ? undefined : "Open or create a project first"}
+        >
+          + Doc
+        </button>
+        <button
+          onClick={() => createFolder(null)}
+          disabled={!snapshot.projectPath}
+          title={snapshot.projectPath ? undefined : "Open or create a project first"}
+        >
+          + Folder
+        </button>
       </div>
 
       <TreeList
@@ -76,40 +130,58 @@ export default function Tree() {
   );
 }
 
-/* ----------------------- Helpers ----------------------- */
+/* -------------------------------------------------------------------------- */
 
+/**
+ * Convert flat lists of folders and docs into a nested tree. The tree will
+ * include both folders and documents at any depth and sorts children so that
+ * folders appear before documents and names are alphabetical.
+ */
 function buildTree(folders: Folder[], docs: Doc[]): TreeNode[] {
-  // Index subfolders by parent folder id
+  /**
+   * Build a nested tree from flat folder and doc lists.
+   *
+   * childrenByParent maps a folder's id to its child folders.
+   * docsByFolder maps a folder's id to its contained docs.
+   */
   const childrenByParent: Record<string | null, Folder[]> = {};
   for (const f of folders) {
     const key = f.parentId ?? null;
     (childrenByParent[key] ||= []).push(f);
   }
 
-  // Index docs by their folderId (this is the key fix)
   const docsByFolder: Record<string | null, Doc[]> = {};
   for (const d of docs) {
     const key = d.folderId ?? null;
     (docsByFolder[key] ||= []).push(d);
   }
 
+  // Recursively build up a TreeNode for each folder.
   const makeFolderNode = (f: Folder): TreeNode => ({
     kind: "folder",
     id: f.id,
     name: f.name,
     children: [
-      // subfolders first
+      // first include subfolders…
       ...(childrenByParent[f.id] || []).map(makeFolderNode),
-      // then docs in this folder
-      ...((docsByFolder[f.id] || []).map((d) => ({ kind: "doc", id: d.id, title: d.title }) as TreeNode)),
+      // …then include docs that live in this folder
+      ...((docsByFolder[f.id] || []).map((d) => ({
+        kind: "doc",
+        id: d.id,
+        title: d.title,
+      }) as TreeNode)),
     ],
   });
 
-  // Root nodes = root folders + docs with folderId === null
+  // Top-level folders and docs (folderId === null) become the root of our tree
   const rootFolders = (childrenByParent[null] || []).map(makeFolderNode);
-  const rootDocs = (docsByFolder[null] || []).map((d) => ({ kind: "doc", id: d.id, title: d.title }) as TreeNode);
+  const rootDocs = (docsByFolder[null] || []).map((d) => ({
+    kind: "doc",
+    id: d.id,
+    title: d.title,
+  }) as TreeNode);
 
-  // Sorting helpers (folders first, then docs; A–Z within type)
+  // Sort helpers to ensure deterministic ordering: folders first, then docs, A→Z within each
   const sortNodes = (nodes: TreeNode[]) =>
     nodes.slice().sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
@@ -126,11 +198,16 @@ function buildTree(folders: Folder[], docs: Doc[]): TreeNode[] {
     return n;
   };
 
+  // Combine and sort root-level folders and docs, then sort children recursively
   return sortNodes([...rootFolders, ...rootDocs]).map(sortDeep);
 }
 
-/* ----------------------- UI ----------------------- */
+/* -------------------------------------------------------------------------- */
 
+/**
+ * Render an unordered list (<ul>) representing a nested tree. Folders can be
+ * expanded/collapsed and have context actions for creating new docs or folders.
+ */
 function TreeList(props: {
   nodes: TreeNode[];
   expanded: Record<string, boolean>;
@@ -146,7 +223,9 @@ function TreeList(props: {
       {nodes.map((n) =>
         n.kind === "folder" ? (
           <li key={n.id} style={{ marginBottom: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, userSelect: "none" }}>
+            <div
+              style={{ display: "flex", alignItems: "center", gap: 6, userSelect: "none" }}
+            >
               <FolderCaret isOpen={!!expanded[n.id]} onClick={() => onToggle(n.id)} />
               <span
                 style={{ fontWeight: 700, cursor: "pointer" }}
@@ -212,6 +291,9 @@ function TreeList(props: {
   );
 }
 
+/**
+ * A simple caret (arrow) component that toggles the open/closed state of a folder.
+ */
 function FolderCaret({ isOpen, onClick }: { isOpen: boolean; onClick: () => void }) {
   return (
     <span
@@ -232,6 +314,10 @@ function FolderCaret({ isOpen, onClick }: { isOpen: boolean; onClick: () => void
   );
 }
 
+/**
+ * Shared styles for the mini buttons that appear next to folders for creating new
+ * docs or folders. They adapt to the current theme via CSS variables.
+ */
 const miniBtnStyle: React.CSSProperties = {
   padding: "2px 6px",
   border: "1px solid var(--border)",
