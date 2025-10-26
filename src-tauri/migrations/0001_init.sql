@@ -50,3 +50,19 @@ created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 note TEXT,
 markdown TEXT
 );
+
+-- New Character type
+CREATE TABLE IF NOT EXISTS "Character" (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  folder_id TEXT,
+  name TEXT NOT NULL,
+  age TEXT,
+  nationality TEXT,
+  sexuality TEXT,
+  height TEXT,
+  attributes TEXT,
+  image_path TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

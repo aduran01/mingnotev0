@@ -18,6 +18,10 @@ fn main() {
       commands::search,
       commands::create_snapshot,
       commands::backup_project,
+      commands::create_character,
+      commands::load_character,
+      commands::save_character,
+      commands::import_character_image,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
