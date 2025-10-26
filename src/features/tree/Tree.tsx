@@ -10,6 +10,10 @@ import { listTree, newDoc, newFolder } from "../../lib/ipc";
 type Folder = { id: string; name: string; parentId: string | null };
 type Doc    = { id: string; title: string; folderId: string | null };
 
+// Normalize null IDs to a stable string key for Record<> maps
+const ROOT_KEY = "__ROOT__";
+const keyOf = (id: string | null): string => id ?? ROOT_KEY;
+
 /**
  * A discriminated union of possible tree nodes. Folders can have children,
  * whereas docs are leaf nodes.
@@ -138,34 +142,28 @@ export default function Tree() {
  * folders appear before documents and names are alphabetical.
  */
 function buildTree(folders: Folder[], docs: Doc[]): TreeNode[] {
-  /**
-   * Build a nested tree from flat folder and doc lists.
-   *
-   * childrenByParent maps a folder's id to its child folders.
-   * docsByFolder maps a folder's id to its contained docs.
-   */
-  const childrenByParent: Record<string | null, Folder[]> = {};
+  // childrenByParent maps normalized parent -> child folders
+  const childrenByParent: Record<string, Folder[]> = {};
   for (const f of folders) {
-    const key = f.parentId ?? null;
+    const key = keyOf(f.parentId);
     (childrenByParent[key] ||= []).push(f);
   }
 
-  const docsByFolder: Record<string | null, Doc[]> = {};
+  // docsByFolder maps normalized folder -> docs
+  const docsByFolder: Record<string, Doc[]> = {};
   for (const d of docs) {
-    const key = d.folderId ?? null;
+    const key = keyOf(d.folderId);
     (docsByFolder[key] ||= []).push(d);
   }
 
-  // Recursively build up a TreeNode for each folder.
+  // Recursively assemble a folder node with its children
   const makeFolderNode = (f: Folder): TreeNode => ({
     kind: "folder",
     id: f.id,
     name: f.name,
     children: [
-      // first include subfolders…
       ...(childrenByParent[f.id] || []).map(makeFolderNode),
-      // …then include docs that live in this folder
-      ...((docsByFolder[f.id] || []).map((d) => ({
+      ...((docsByFolder[f.id] || []).map((d: Doc) => ({
         kind: "doc",
         id: d.id,
         title: d.title,
@@ -173,15 +171,15 @@ function buildTree(folders: Folder[], docs: Doc[]): TreeNode[] {
     ],
   });
 
-  // Top-level folders and docs (folderId === null) become the root of our tree
-  const rootFolders = (childrenByParent[null] || []).map(makeFolderNode);
-  const rootDocs = (docsByFolder[null] || []).map((d) => ({
+  // Root = items whose parent/folderId is null → normalized as ROOT_KEY
+  const rootFolders = (childrenByParent[ROOT_KEY] || []).map(makeFolderNode);
+  const rootDocs = (docsByFolder[ROOT_KEY] || []).map((d: Doc) => ({
     kind: "doc",
     id: d.id,
     title: d.title,
   }) as TreeNode);
 
-  // Sort helpers to ensure deterministic ordering: folders first, then docs, A→Z within each
+  // Sort: folders first, then docs; A→Z within type
   const sortNodes = (nodes: TreeNode[]) =>
     nodes.slice().sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
@@ -190,17 +188,14 @@ function buildTree(folders: Folder[], docs: Doc[]): TreeNode[] {
       return an.localeCompare(bn);
     });
 
-  const sortDeep = (n: TreeNode): TreeNode => {
-    if (n.kind === "folder") {
-      const kids = sortNodes(n.children).map(sortDeep);
-      return { ...n, children: kids };
-    }
-    return n;
-  };
+  const sortDeep = (n: TreeNode): TreeNode =>
+    n.kind === "folder"
+      ? { ...n, children: sortNodes(n.children).map(sortDeep) }
+      : n;
 
-  // Combine and sort root-level folders and docs, then sort children recursively
   return sortNodes([...rootFolders, ...rootDocs]).map(sortDeep);
 }
+
 
 /* -------------------------------------------------------------------------- */
 
