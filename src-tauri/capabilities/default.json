@@ -1,9 +1,11 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
+  "$schema": "../node_modules/@tauri-apps/cli/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Default capability set for the main window",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    { "identifier": "core:default" },
+    { "identifier": "dialog:default" },
+    { "identifier": "dialog:allow-open" }
   ]
 }

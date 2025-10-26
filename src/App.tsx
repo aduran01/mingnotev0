@@ -1,4 +1,4 @@
-import React from "react";
+import * as React from "react";
 import "./theme.css";
 import Tree from "./features/tree/Tree";
 import Editor from "./features/editor/Editor";
@@ -10,9 +10,11 @@ import { createProject, openProject, loadDoc, listTree, backupProject } from "./
 export default function App(){
   const s = useSnapshot(state);
 
-  const createOrOpen = async (kind:"open"|"create")=>{
-    const dir = await open({ directory:true, multiple:false });
+const createOrOpen = async (kind: "open" | "create") => {
+  try {
+    const dir = await open({ directory: true, multiple: false });
     if (!dir || Array.isArray(dir)) return;
+
     if (kind === "create") {
       const name = prompt("Project name?", "My Project") || "My Project";
       const p = await createProject(dir as string, name);
@@ -21,9 +23,16 @@ export default function App(){
       const p = await openProject(dir as string);
       state.projectPath = p;
     }
-    const {docs} = await listTree(state.projectPath);
+
+    const { docs } = await listTree(state.projectPath);
     if (docs[0]) state.currentDocId = docs[0].id;
-  };
+  } catch (err) {
+    // Surface any permission or runtime errors
+    alert(`Failed to open directory: ${err}`);
+    console.error(err);
+  }
+};
+
 
   React.useEffect(()=>{
     (async ()=>{

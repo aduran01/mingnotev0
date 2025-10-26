@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import * as React from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSnapshot } from "valtio";
 import { state } from "../../lib/store";
 import { listTree, newDoc, newFolder } from "../../lib/ipc";
@@ -36,20 +37,20 @@ export default function Tree() {
   // track which folders are expanded in the UI
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  /**
-   * Refresh the folder/doc lists from the current project path.
-   * Also keep the global state in sync so other components can react.
-   */
-  const refresh = useCallback(async () => {
-    if (!state.projectPath) return;
+ // Refresh the folder/doc lists with error handling
+const refresh = useCallback(async () => {
+  if (!state.projectPath) return;
+  try {
     const { folders: f, docs: d } = await listTree(state.projectPath);
-    // update local lists
-    setFolders(f);
-    setDocs(d);
-    // propagate to global state
-    state.folders = f;
-    state.docs = d;
-  }, []);
+    setFolders(f as Folder[]);
+    setDocs(d as Doc[]);
+    state.folders = f as Folder[];
+    state.docs = d as Doc[];
+  } catch (err) {
+    console.error("Failed to refresh tree:", err);
+    alert(`Failed to load tree: ${err}`);
+  }
+}, []);
 
   // Whenever the projectPath changes, re-fetch the tree.
   useEffect(() => {
@@ -65,42 +66,40 @@ export default function Tree() {
   const toggle = (id: string) =>
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
-  /**
-   * Create a new folder. If parentId is null, the folder will be at the root.
-   * Expands the parent folder so the new child is visible.
-   */
-  const createFolder = async (parentId: string | null) => {
-    // Require a project to be open before adding folders
-    if (!state.projectPath) {
-      alert("Please create or open a project first.");
-      return;
-    }
-    const name = prompt("New folder name?") || "New Folder";
+  // Create a new folder with error handling
+const createFolder = async (parentId: string | null) => {
+  if (!state.projectPath) {
+    alert("Please create or open a project first.");
+    return;
+  }
+  const name = prompt("New folder name?") || "New Folder";
+  try {
     await newFolder(state.projectPath, name, parentId);
     await refresh();
-    // expand the parent so the new folder appears
     if (parentId) setExpanded((e) => ({ ...e, [parentId]: true }));
-  };
+  } catch (err) {
+    console.error("Failed to create folder:", err);
+    alert(`Failed to create folder: ${err}`);
+  }
+};
 
-  /**
-   * Create a new document. If folderId is null, the doc will be at the root.
-   * Sets the currentDocId so the editor loads the new doc,
-   * and expands the parent folder so the new doc is visible.
-   */
-  const createDoc = async (folderId: string | null) => {
-    // Require a project to be open before adding documents
-    if (!state.projectPath) {
-      alert("Please create or open a project first.");
-      return;
-    }
-    const title = prompt("New document title?") || "Untitled";
+  // Create a new document with error handling
+const createDoc = async (folderId: string | null) => {
+  if (!state.projectPath) {
+    alert("Please create or open a project first.");
+    return;
+  }
+  const title = prompt("New document title?") || "Untitled";
+  try {
     const id = await newDoc(state.projectPath, title, folderId);
     await refresh();
-    // set the doc as current for editing
     state.currentDocId = id;
-    // expand the parent so the new doc appears
     if (folderId) setExpanded((e) => ({ ...e, [folderId]: true }));
-  };
+  } catch (err) {
+    console.error("Failed to create document:", err);
+    alert(`Failed to create document: ${err}`);
+  }
+};
 
   return (
     <div style={{ padding: 12 }}>
