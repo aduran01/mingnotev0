@@ -143,42 +143,60 @@ export default function CharacterEditor() {
     state.charEditor.lastSaved = Date.now();
   };
 
-  /* --- pick image: instant preview from picked path, then switch to saved relative path --- */
-  const onPickImage = async () => {
-    const picked = await open({
-      multiple: false,
-      directory: false,
-      filters: [
-        { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
-        { name: "PDF", extensions: ["pdf"] },
-      ],
-    });
-    if (!picked || typeof picked !== "string") return;
+/* --- pick image: instant preview from picked path, then switch to saved relative path --- */
+const onPickImage = async () => {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [
+      { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
+      { name: "PDF", extensions: ["pdf"] },
+    ],
+  });
+  if (!picked || typeof picked !== "string") return;
 
-    // 1) instant preview from OS path
-    cacheSeed.current = Date.now();
-    const immediate = convertFileSrc(picked) + `?v=${cacheSeed.current}`;
-    setImageUrl(immediate);
-    setImgErr("");
+  // 1) Instant preview from OS path (cache-busted)
+  cacheSeed.current = Date.now();
+  const immediate = convertFileSrc(picked) + `?v=${cacheSeed.current}`;
+  console.debug("[CharacterEditor] immediate preview url:", immediate);
+  setImageUrl(immediate);
+  setImgErr("");
 
-    try {
-      // 2) import into project; backend returns project-relative path
-      const rel = await importCharacterImage(state.projectPath, state.currentCharId, picked);
+  try {
+    // 2) Import into project; backend SHOULD return a project-relative path like:
+    //    assets/characters/<id>/photo.png
+    let rel = await importCharacterImage(state.projectPath, state.currentCharId, picked);
 
-      // 3) persist immediately so state & DB match
-      state.charEditor.image = rel;
-      await persistNow();
+    // Normalize slashes just in case (Windows backslashes)
+    rel = rel.replace(/\\/g, "/");
 
-      // 4) swap preview to saved relative path (works even if original file is moved)
-      const savedUrl = await buildDisplayUrl(rel);
-      setImageUrl(savedUrl);
-      setImgErr("");
-    } catch (e) {
-      console.error("importCharacterImage failed:", e);
-      // keep the immediate preview; surface a gentle UI hint
-      setImgErr("Could not import the file into the project. Previewing original path.");
+    // 3) Persist immediately so state & DB match
+    state.charEditor.image = rel;
+    await persistNow();
+
+    // 4) Swap preview to saved project-relative path
+    const savedUrl = await buildDisplayUrl(rel);
+
+    // --- Diagnostics you requested ---
+    console.debug("[CharacterEditor] final imageUrl:", savedUrl);
+    if (!savedUrl.startsWith("tauri://localhost/")) {
+      console.warn(
+        "[CharacterEditor] imageUrl is not a tauri://localhost URL; check CSP and returned path"
+      );
+      console.log("projectPath:", state.projectPath);
+      console.log("stored image (should be project-relative):", rel);
     }
-  };
+
+    setImageUrl(savedUrl);
+    setImgErr("");
+  } catch (e) {
+    console.error("importCharacterImage failed:", e);
+    // keep the immediate preview; surface a gentle UI hint
+    setImgErr(
+      "Could not import the file into the project. Previewing original path."
+    );
+  }
+};
 
   /* ------------------------------ UI ------------------------------ */
 

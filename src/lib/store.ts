@@ -1,4 +1,3 @@
-// src/lib/store.ts
 import { proxy } from "valtio";
 
 export type Doc = { id: string; title: string; folderId: string | null };
@@ -15,8 +14,14 @@ export const state = proxy({
   folders: [] as Folder[],
   characters: [] as Character[],
 
-  // Added font & lineHeight defaults here
-  editor: { md: "", lastSaved: 0, font: "Arial", lineHeight: 1.6 },
+  // Added showCharCount to control visibility of the character counter.
+  editor: {
+    md: "",
+    lastSaved: 0,
+    font: "Arial",
+    lineHeight: 1.6,
+    showCharCount: false,
+  },
 
   charEditor: {
     age: "",
