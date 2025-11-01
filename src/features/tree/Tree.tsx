@@ -1,5 +1,6 @@
+// src/features/tree/Tree.tsx
 import * as React from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSnapshot } from "valtio";
 import { state } from "../../lib/store";
 import { listTree, newDoc, newFolder, newCharacter } from "../../lib/ipc";
@@ -18,10 +19,21 @@ type TreeNode =
 
 export default function Tree() {
   const snapshot = useSnapshot(state);
+
   const [folders, setFolders] = useState<Folder[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    folderId: string | null;
+    visible: boolean;
+  }>({ x: 0, y: 0, folderId: null, visible: false });
+
+  const menuRef = useRef<HTMLUListElement | null>(null);
 
   const refresh = useCallback(async () => {
     if (!state.projectPath) return;
@@ -39,12 +51,21 @@ export default function Tree() {
   }, [snapshot.projectPath, refresh]);
 
   const rootNodes = useMemo(() => buildTree(folders, docs, characters), [folders, docs, characters]);
-
   const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  // ---------- Prompt helpers (Cancel-safe) ----------
+  const promptName = (message: string) => {
+    const raw = window.prompt(message, "");
+    if (raw === null) return null; // cancelled
+    const trimmed = raw.trim();
+    if (!trimmed) return null; // empty -> treat as cancel
+    return trimmed;
+  };
 
   const createFolder = async (parentId: string | null) => {
     if (!state.projectPath) return alert("Open or create a project first.");
-    const name = prompt("New folder name?", "") || "New folder";
+    const name = promptName("New folder name?");
+    if (name === null) return;
     await newFolder(state.projectPath, name, parentId);
     await refresh();
     if (parentId) setExpanded((e) => ({ ...e, [parentId]: true }));
@@ -52,7 +73,8 @@ export default function Tree() {
 
   const createDoc = async (folderId: string | null) => {
     if (!state.projectPath) return alert("Open or create a project first.");
-    const title = prompt("New document title?", "") || "Untitled document";
+    const title = promptName("New document title?");
+    if (title === null) return;
     const id = await newDoc(state.projectPath, title, folderId);
     await refresh();
     state.currentDocId = id;
@@ -62,7 +84,8 @@ export default function Tree() {
 
   const createCharacterTab = async (folderId: string | null) => {
     if (!state.projectPath) return alert("Open or create a project first.");
-    const name = prompt("New character name?", "") || "New character";
+    const name = promptName("New character name?");
+    if (name === null) return;
     const id = await newCharacter(state.projectPath, name, folderId);
     await refresh();
     state.currentCharId = id;
@@ -70,20 +93,56 @@ export default function Tree() {
     if (folderId) setExpanded((e) => ({ ...e, [folderId]: true }));
   };
 
+  // ---------- Context menu open/close ----------
+  const openContextMenu = (e: React.MouseEvent, folderId: string | null) => {
+    e.preventDefault();          // stop the browser menu
+    e.stopPropagation();         // keep it local
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      folderId,
+      visible: true,
+    });
+  };
+
+  const closeContextMenu = () =>
+    setContextMenu((cm) => (cm.visible ? { ...cm, visible: false } : cm));
+
+  // Close on outside click, scroll, resize, Esc (NO global 'contextmenu' close)
+  useEffect(() => {
+    if (!contextMenu.visible) return;
+
+    const onMouseDown = (ev: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(ev.target as Node)) {
+        closeContextMenu();
+      }
+    };
+    const onScroll = () => closeContextMenu();
+    const onResize = () => closeContextMenu();
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") closeContextMenu();
+    };
+
+    document.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [contextMenu.visible]);
+
+  // ---------- Render ----------
   return (
-    <nav aria-label="Project navigation" style={{ padding: "16px" }}>
-      {/* Top-level add buttons with sentence-case labels and consistent spacing */}
-      <div style={{ marginBottom: "16px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-        <button onClick={() => createDoc(null)} disabled={!snapshot.projectPath}>
-          + Add document
-        </button>
-        <button onClick={() => createFolder(null)} disabled={!snapshot.projectPath}>
-          + Add folder
-        </button>
-        <button onClick={() => createCharacterTab(null)} disabled={!snapshot.projectPath}>
-          + Add character
-        </button>
-      </div>
+    <nav
+      aria-label="Project navigation"
+      style={{ padding: "16px", position: "relative", userSelect: "none" }}
+      onContextMenu={(e) => openContextMenu(e, null)}   // right-click root
+    >
       <TreeList
         nodes={rootNodes}
         expanded={expanded}
@@ -91,13 +150,68 @@ export default function Tree() {
         onCreateDoc={createDoc}
         onCreateFolder={createFolder}
         onCreateCharacter={createCharacterTab}
+        onContextMenu={openContextMenu}
       />
+
       {rootNodes.length === 0 && (
         <p style={{ opacity: 0.7, marginTop: "12px" }}>
-          <em>No items yet. Use the buttons above to add content.</em>
+          <em>No items yet. Right-click to add content.</em>
         </p>
       )}
+
+      {contextMenu.visible && (
+        <ul
+          ref={menuRef}
+          style={{
+            position: "fixed",
+            top: contextMenu.y,
+            left: contextMenu.x,
+            zIndex: 1000,
+            listStyle: "none",
+            margin: 0,
+            padding: "6px 0",
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            boxShadow: "var(--shadow)",
+            minWidth: 170,
+          }}
+          // Prevent inside interactions from bubbling/closing
+          onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <MenuItem onClick={() => { createDoc(contextMenu.folderId); closeContextMenu(); }}>
+            New document
+          </MenuItem>
+          <MenuItem onClick={() => { createFolder(contextMenu.folderId); closeContextMenu(); }}>
+            New folder
+          </MenuItem>
+          <MenuItem onClick={() => { createCharacterTab(contextMenu.folderId); closeContextMenu(); }}>
+            New character
+          </MenuItem>
+        </ul>
+      )}
     </nav>
+  );
+}
+
+function MenuItem(props: { children: React.ReactNode; onClick: () => void }) {
+  return (
+    <li
+      role="menuitem"
+      style={{ padding: "8px 14px", cursor: "pointer" }}
+      onClick={props.onClick}
+      onMouseDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          props.onClick();
+        }
+      }}
+      tabIndex={0}
+    >
+      {props.children}
+    </li>
   );
 }
 
@@ -154,6 +268,7 @@ function TreeList(props: {
   onCreateDoc: (folderId: string | null) => void;
   onCreateFolder: (parentId: string | null) => void;
   onCreateCharacter: (folderId: string | null) => void;
+  onContextMenu: (e: React.MouseEvent, folderId: string | null) => void;
   depth?: number;
 }) {
   const {
@@ -163,8 +278,10 @@ function TreeList(props: {
     onCreateDoc,
     onCreateFolder,
     onCreateCharacter,
+    onContextMenu,
     depth = 0,
   } = props;
+  const snap = useSnapshot(state);
 
   return (
     <ul
@@ -176,13 +293,16 @@ function TreeList(props: {
     >
       {nodes.map((n) =>
         n.kind === "folder" ? (
-          <li key={n.id} style={{ marginBottom: "8px" }}>
+          <li
+            key={n.id}
+            style={{ marginBottom: "8px" }}
+            onContextMenu={(e) => onContextMenu(e, n.id)}   // folder-scoped menu
+          >
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                userSelect: "none",
               }}
             >
               <FolderCaret isOpen={!!expanded[n.id]} onClick={() => onToggle(n.id)} />
@@ -193,29 +313,6 @@ function TreeList(props: {
               >
                 📁 {n.name}
               </span>
-              <div style={{ marginLeft: "auto", display: "flex", gap: "4px" }}>
-                <button
-                  onClick={() => onCreateDoc(n.id)}
-                  style={miniBtnStyle}
-                  aria-label="Add document to folder"
-                >
-                  + doc
-                </button>
-                <button
-                  onClick={() => onCreateFolder(n.id)}
-                  style={miniBtnStyle}
-                  aria-label="Add subfolder"
-                >
-                  + folder
-                </button>
-                <button
-                  onClick={() => onCreateCharacter(n.id)}
-                  style={miniBtnStyle}
-                  aria-label="Add character"
-                >
-                  + char
-                </button>
-              </div>
             </div>
 
             {expanded[n.id] && n.children.length > 0 && (
@@ -226,12 +323,22 @@ function TreeList(props: {
                 onCreateDoc={onCreateDoc}
                 onCreateFolder={onCreateFolder}
                 onCreateCharacter={onCreateCharacter}
+                onContextMenu={onContextMenu}
                 depth={depth + 1}
               />
             )}
           </li>
         ) : n.kind === "doc" ? (
-          <li key={n.id} style={{ marginBottom: "6px", paddingLeft: "20px" }}>
+          <li
+            key={n.id}
+            style={{
+              marginBottom: "6px",
+              paddingLeft: "20px",
+              background: snap.currentDocId === n.id ? "rgba(0,0,0,0.06)" : undefined,
+              borderRadius: snap.currentDocId === n.id ? 6 : undefined,
+            }}
+            onContextMenu={(e) => onContextMenu(e, null)}  // allow right-click at this level too
+          >
             <a
               href="#"
               onClick={(e) => {
@@ -246,7 +353,16 @@ function TreeList(props: {
             </a>
           </li>
         ) : (
-          <li key={n.id} style={{ marginBottom: "6px", paddingLeft: "20px" }}>
+          <li
+            key={n.id}
+            style={{
+              marginBottom: "6px",
+              paddingLeft: "20px",
+              background: snap.currentCharId === n.id ? "rgba(0,0,0,0.06)" : undefined,
+              borderRadius: snap.currentCharId === n.id ? 6 : undefined,
+            }}
+            onContextMenu={(e) => onContextMenu(e, null)}
+          >
             <a
               href="#"
               onClick={(e) => {
@@ -291,14 +407,3 @@ function FolderCaret({
     </span>
   );
 }
-
-// Slightly larger mini-button style for better click targets
-const miniBtnStyle: React.CSSProperties = {
-  padding: "4px 6px",
-  border: "1px solid var(--border)",
-  borderRadius: 8,
-  cursor: "pointer",
-  background: "var(--card)",
-  color: "var(--fg)",
-  fontSize: "0.75rem",
-};

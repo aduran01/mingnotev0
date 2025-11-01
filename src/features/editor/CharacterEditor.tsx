@@ -6,6 +6,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { join } from "@tauri-apps/api/path";
 
+// NOTE: This file has been modified to remove the input field that allowed
+// users to paste arbitrary image/PDF URLs or local paths.  Images must now
+// be attached exclusively via the "Add image" button, which prompts the
+// user to select a file from their filesystem.  All other functionality
+// (auto‐saving, attribute editing, etc.) remains unchanged.
+
 function isHttpUrl(raw: string): boolean {
   return /^https?:\/\//i.test(raw);
 }
@@ -14,7 +20,7 @@ function isPdf(path: string): boolean {
 }
 function looksAbsolutePath(p: string): boolean {
   // Windows "C:\", UNC "\\server\share", or POSIX "/"
-  return /^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p) || p.startsWith("/");
+  return /^[a-zA-Z]:[\\\/]/.test(p) || /^\\\\/.test(p) || p.startsWith("/");
 }
 function normSlashes(p: string): string {
   return p.replace(/\\/g, "/");
@@ -30,7 +36,7 @@ export default function CharacterEditor() {
   // Build a safe, displayable URL from whatever is in s.charEditor.image
   const buildDisplayUrl = async (raw: string): Promise<string> => {
     if (!raw) return "";
-    if (isHttpUrl(raw)) return raw; // use as-is
+    if (isHttpUrl(raw)) return raw; // use as‑is
 
     let pathOnDisk = normSlashes(raw);
     try {
@@ -38,7 +44,7 @@ export default function CharacterEditor() {
       if (!looksAbsolutePath(pathOnDisk)) {
         pathOnDisk = await join(state.projectPath, pathOnDisk);
       }
-      // Convert to webview-safe URL and add a cache-buster so changes show immediately
+      // Convert to webview‑safe URL and add a cache‑buster so changes show immediately
       const url = convertFileSrc(pathOnDisk);
       return `${url}?v=${Date.now()}`;
     } catch {
@@ -156,7 +162,19 @@ export default function CharacterEditor() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto", maxWidth: "70ch", margin: "0 auto", padding: "16px" }}>
+    <div
+  style={{
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    overflowY: "auto",
+    width: "50%",          // ⬅ wider panel
+    maxWidth: "120ch",     // ⬅ expands readable width (~120 characters)
+    margin: "0 auto",
+    padding: "24px",       // ⬅ slightly more breathing room
+  }}
+>
+
       {/* Image */}
       <div className="card" style={{ padding: "16px", marginBottom: "16px" }}>
         <h2 style={{ margin: 0, marginBottom: "12px", fontSize: "1.2rem" }}>Character image</h2>
@@ -164,7 +182,7 @@ export default function CharacterEditor() {
         {imageUrl ? (
           isPdf(s.charEditor.image) ? (
             <object
-              key={imageUrl}                      // ensures re-render when URL changes
+              key={imageUrl}                      // ensures re‑render when URL changes
               data={imageUrl}
               type="application/pdf"
               style={{ width: "100%", height: 300, marginBottom: 8, border: "1px solid var(--border)", borderRadius: 8 }}
@@ -210,20 +228,6 @@ export default function CharacterEditor() {
           >
             Add image
           </button>
-
-          {/* power-user option */}
-          <input
-            type="text"
-            placeholder="Paste image/PDF URL or local path"
-            value={s.charEditor.image}
-            onChange={(e) => (state.charEditor.image = e.target.value)}
-            onBlur={async () => {
-              await onBlur();
-              setImageUrl(await buildDisplayUrl(state.charEditor.image));
-            }}
-            style={{ flex: 1, padding: 8, borderRadius: 8, border: "1px solid var(--border)", minWidth: 0 }}
-            aria-label="Image URL or path"
-          />
         </div>
       </div>
 
