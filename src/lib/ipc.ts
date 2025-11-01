@@ -41,20 +41,6 @@ export const newDoc = (projectPath: string, title: string, folderId?: string | n
   });
 };
 
-//folder deletion functions
-export async function deleteFolderRecursive(absPath: string) {
-  // absPath should be the absolute or app-root-relative path MingNote uses
-  return invoke("delete_folder_recursive", { absPath });
-}
-
-export async function deleteDoc(absPath: string) {
-  return invoke("delete_doc", { absPath });
-}
-
-export async function deleteCharacter(absPath: string) {
-  return invoke("delete_character", { absPath });
-}
-
 // Folders
 export const newFolder = (projectPath: string, name: string, parentId?: string | null) => {
   const parentValue = parentId ?? null;
@@ -128,3 +114,44 @@ export const importCharacterImage = (
     sourcePath,
     source_path: sourcePath,
   });
+
+  export async function deleteFolderRecursive(
+  projectPath: string,
+  folderId: string,
+) {
+  return invoke("delete_folder_recursive", {
+    projectPath,
+    project_path: projectPath,
+    folderId,
+    folder_id: folderId,
+  });
+}
+
+/**
+ * Delete a single document by id.  Removes the row from the database
+ * and deletes the associated markdown file from the project’s `md` directory.
+ */
+export async function deleteDoc(projectPath: string, docId: string) {
+  return invoke("delete_doc", {
+    projectPath,
+    project_path: projectPath,
+    docId,
+    doc_id: docId,
+  });
+}
+
+/**
+ * Delete a single character by id.  Removes the row from the database
+ * and deletes any character asset directory under `assets/characters`.
+ */
+export async function deleteCharacter(
+  projectPath: string,
+  charId: string,
+) {
+  return invoke("delete_character", {
+    projectPath,
+    project_path: projectPath,
+    charId,
+    char_id: charId,
+  });
+}

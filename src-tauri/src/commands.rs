@@ -3,6 +3,7 @@ use std::path::Path;
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::fs;
 
 use crate::db::{run_migrations, select_docs, select_folders, select_chars};
 use crate::fs_utils::atomic_write;
@@ -25,6 +26,126 @@ fn mirror_md(project_path: &str, doc_id: &str, md: &str) -> Result<(), String> {
     let path = Path::new(project_path).join("md").join(format!("{doc_id}.md"));
     atomic_write(&path, md.as_bytes()).map_err(|e| e.to_string())
 }
+
+// Remove a document row and its markdown file.
+fn delete_doc_internal(
+    conn: &mut Connection,
+    project_path: &str,
+    doc_id: &str,
+) -> Result<(), String> {
+    // Delete from DB (Body is removed via ON DELETE CASCADE).
+    conn.execute("DELETE FROM Document WHERE id=?", params![doc_id])
+        .map_err(|e| e.to_string())?;
+    // Remove the markdown file if it exists.
+    let md_path = Path::new(project_path).join("md").join(format!("{doc_id}.md"));
+    let _ = fs::remove_file(&md_path);
+    Ok(())
+}
+
+// Remove a character row and its asset directory.
+fn delete_character_internal(
+    conn: &mut Connection,
+    project_path: &str,
+    char_id: &str,
+) -> Result<(), String> {
+    conn.execute("DELETE FROM Character WHERE id=?", params![char_id])
+        .map_err(|e| e.to_string())?;
+    let dir = Path::new(project_path)
+        .join("assets")
+        .join("characters")
+        .join(char_id);
+    let _ = fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_doc(project_path: String, doc_id: String) -> Result<(), String> {
+    let dbp = Path::new(&project_path).join("project.db");
+    let mut conn = Connection::open(&dbp).map_err(|e| e.to_string())?;
+    delete_doc_internal(&mut conn, &project_path, &doc_id)
+}
+
+#[tauri::command]
+pub fn delete_character(project_path: String, char_id: String) -> Result<(), String> {
+    let dbp = Path::new(&project_path).join("project.db");
+    let mut conn = Connection::open(&dbp).map_err(|e| e.to_string())?;
+    delete_character_internal(&mut conn, &project_path, &char_id)
+}
+
+#[tauri::command]
+pub fn delete_folder_recursive(
+    project_path: String,
+    folder_id: String,
+) -> Result<(), String> {
+    use std::path::Path;
+    use rusqlite::{params, Connection};
+
+    let dbp = Path::new(&project_path).join("project.db");
+    let mut conn = Connection::open(&dbp).map_err(|e| e.to_string())?;
+
+    // 1) Collect all descendant folder ids (BFS). Scope statements so they drop.
+    let mut to_delete = vec![folder_id.clone()];
+    let mut idx = 0;
+    while idx < to_delete.len() {
+        let current = to_delete[idx].clone();
+        idx += 1;
+
+        // Scope ensures `st` and its iterator drop before next use of &mut conn
+        let child_ids: Vec<String> = {
+            let mut st = conn
+                .prepare("SELECT id FROM Folder WHERE parent_id=?")
+                .map_err(|e| e.to_string())?;
+            let rows = st
+                .query_map([current], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            rows.filter_map(Result::ok).collect()
+        };
+
+        to_delete.extend(child_ids);
+    }
+
+    // 2) For each folder, delete its docs (collect first, then mutate).
+    for fid in &to_delete {
+        let doc_ids: Vec<String> = {
+            let mut st = conn
+                .prepare("SELECT id FROM Document WHERE folder_id=?")
+                .map_err(|e| e.to_string())?;
+            let rows = st
+                .query_map([fid.clone()], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            rows.filter_map(Result::ok).collect()
+        };
+
+        for doc_id in doc_ids {
+            // now it's safe to mutably borrow `conn`
+            delete_doc_internal(&mut conn, &project_path, &doc_id)?;
+        }
+
+        // 3) Delete characters in this folder (same pattern).
+        let char_ids: Vec<String> = {
+            let mut stc = conn
+                .prepare("SELECT id FROM Character WHERE folder_id=?")
+                .map_err(|e| e.to_string())?;
+            let rows = stc
+                .query_map([fid.clone()], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            rows.filter_map(Result::ok).collect()
+        };
+
+        for char_id in char_ids {
+            delete_character_internal(&mut conn, &project_path, &char_id)?;
+        }
+    }
+
+    // 4) Delete folders themselves (leaves first is safest).
+    for fid in to_delete.into_iter().rev() {
+        conn.execute("DELETE FROM Folder WHERE id=?", params![fid])
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 
 // ------- Commands
 
