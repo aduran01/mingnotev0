@@ -3,7 +3,16 @@ import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSnapshot } from "valtio";
 import { state } from "../../lib/store";
-import { listTree, newDoc, newFolder, newCharacter } from "../../lib/ipc";
+import {
+  listTree,
+  newDoc,
+  newFolder,
+  newCharacter,
+  deleteFolderRecursive,
+  deleteDoc,
+  deleteCharacter,
+} from "../../lib/ipc";
+import ConfirmDialog from "../../components/ConfirmDialog";
 
 type Folder = { id: string; name: string; parentId: string | null };
 type Doc = { id: string; title: string; folderId: string | null };
@@ -17,6 +26,14 @@ type TreeNode =
   | { kind: "doc"; id: string; title: string }
   | { kind: "character"; id: string; name: string };
 
+type CtxKind = "root" | "folder" | "doc" | "character";
+
+type ContextTarget =
+  | { kind: "root" }
+  | { kind: "folder"; id: string }
+  | { kind: "doc"; id: string }
+  | { kind: "character"; id: string };
+
 export default function Tree() {
   const snapshot = useSnapshot(state);
 
@@ -25,13 +42,17 @@ export default function Tree() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  // Context menu state
+  // Context menu state: where it opens + what it targets
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
-    folderId: string | null;
+    target: ContextTarget;
     visible: boolean;
-  }>({ x: 0, y: 0, folderId: null, visible: false });
+  }>({ x: 0, y: 0, target: { kind: "root" }, visible: false });
+
+  // Folder delete confirm
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingFolderId, setPendingFolderId] = useState<string | null>(null);
 
   const menuRef = useRef<HTMLUListElement | null>(null);
 
@@ -50,8 +71,12 @@ export default function Tree() {
     if (snapshot.projectPath) refresh();
   }, [snapshot.projectPath, refresh]);
 
-  const rootNodes = useMemo(() => buildTree(folders, docs, characters), [folders, docs, characters]);
-  const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  const rootNodes = useMemo(
+    () => buildTree(folders, docs, characters),
+    [folders, docs, characters],
+  );
+  const toggle = (id: string) =>
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
   // ---------- Prompt helpers (Cancel-safe) ----------
   const promptName = (message: string) => {
@@ -93,14 +118,71 @@ export default function Tree() {
     if (folderId) setExpanded((e) => ({ ...e, [folderId]: true }));
   };
 
+  // ---------- Deletes ----------
+  const requestDeleteFolder = (folderId: string) => {
+    setPendingFolderId(folderId);
+    setConfirmOpen(true);
+  };
+
+  const actuallyDeleteFolder = async (folderId: string) => {
+    if (!state.projectPath) return alert("Open or create a project first.");
+    try {
+      // If your signature differs, adjust here:
+      // e.g., await deleteFolderRecursive(state.projectPath, { folderId })
+      await deleteFolderRecursive(state.projectPath, folderId);
+      // Clear selections; deleted folder may include current doc/char
+      state.currentDocId = "";
+      state.currentCharId = "";
+      await refresh();
+    } catch (err) {
+      console.error("Delete folder failed:", err);
+      alert("Failed to delete folder. See console for details.");
+    }
+  };
+
+  const handleDeleteDoc = async (docId: string) => {
+    if (!state.projectPath) return alert("Open or create a project first.");
+    try {
+      await deleteDoc(state.projectPath, docId);
+      if (state.currentDocId === docId) state.currentDocId = "";
+      await refresh();
+    } catch (err) {
+      console.error("Delete doc failed:", err);
+      alert("Failed to delete document. See console for details.");
+    }
+  };
+
+  const handleDeleteCharacter = async (charId: string) => {
+    if (!state.projectPath) return alert("Open or create a project first.");
+    try {
+      await deleteCharacter(state.projectPath, charId);
+      if (state.currentCharId === charId) state.currentCharId = "";
+      await refresh();
+    } catch (err) {
+      console.error("Delete character failed:", err);
+      alert("Failed to delete character. See console for details.");
+    }
+  };
+
   // ---------- Context menu open/close ----------
-  const openContextMenu = (e: React.MouseEvent, folderId: string | null) => {
-    e.preventDefault();          // stop the browser menu
-    e.stopPropagation();         // keep it local
+  const openRootMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
-      folderId,
+      target: { kind: "root" },
+      visible: true,
+    });
+  };
+
+  const openContextMenu = (e: React.MouseEvent, target: ContextTarget) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      target,
       visible: true,
     });
   };
@@ -141,7 +223,7 @@ export default function Tree() {
     <nav
       aria-label="Project navigation"
       style={{ padding: "16px", position: "relative", userSelect: "none" }}
-      onContextMenu={(e) => openContextMenu(e, null)}   // right-click root
+      onContextMenu={openRootMenu}   // right-click root
     >
       <TreeList
         nodes={rootNodes}
@@ -174,23 +256,95 @@ export default function Tree() {
             border: "1px solid var(--border)",
             borderRadius: 8,
             boxShadow: "var(--shadow)",
-            minWidth: 170,
+            minWidth: 190,
           }}
-          // Prevent inside interactions from bubbling/closing
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <MenuItem onClick={() => { createDoc(contextMenu.folderId); closeContextMenu(); }}>
-            New document
-          </MenuItem>
-          <MenuItem onClick={() => { createFolder(contextMenu.folderId); closeContextMenu(); }}>
-            New folder
-          </MenuItem>
-          <MenuItem onClick={() => { createCharacterTab(contextMenu.folderId); closeContextMenu(); }}>
-            New character
-          </MenuItem>
+          {/* Root menu: add-only */}
+          {contextMenu.target.kind === "root" && (
+            <>
+              <MenuItem onClick={() => { createDoc(null); closeContextMenu(); }}>
+                New document
+              </MenuItem>
+              <MenuItem onClick={() => { createFolder(null); closeContextMenu(); }}>
+                New folder
+              </MenuItem>
+              <MenuItem onClick={() => { createCharacterTab(null); closeContextMenu(); }}>
+                New character
+              </MenuItem>
+            </>
+          )}
+
+          {/* Folder menu: add + delete */}
+          {contextMenu.target.kind === "folder" && (
+            <>
+              <MenuItem onClick={() => { createDoc(contextMenu.target.id); closeContextMenu(); }}>
+                New document
+              </MenuItem>
+              <MenuItem onClick={() => { createFolder(contextMenu.target.id); closeContextMenu(); }}>
+                New folder
+              </MenuItem>
+              <MenuItem onClick={() => { createCharacterTab(contextMenu.target.id); closeContextMenu(); }}>
+                New character
+              </MenuItem>
+              <hr style={{ margin: "6px 0", border: 0, borderTop: "1px solid var(--border)" }} />
+              <MenuItem
+                onClick={() => {
+                  requestDeleteFolder(contextMenu.target.id);
+                  closeContextMenu();
+                }}
+              >
+                Delete folder…
+              </MenuItem>
+            </>
+          )}
+
+          {/* Doc menu: delete */}
+          {contextMenu.target.kind === "doc" && (
+            <>
+              <MenuItem
+                onClick={() => {
+                  handleDeleteDoc(contextMenu.target.id);
+                  closeContextMenu();
+                }}
+              >
+                Delete document
+              </MenuItem>
+            </>
+          )}
+
+          {/* Character menu: delete */}
+          {contextMenu.target.kind === "character" && (
+            <>
+              <MenuItem
+                onClick={() => {
+                  handleDeleteCharacter(contextMenu.target.id);
+                  closeContextMenu();
+                }}
+              >
+                Delete character
+              </MenuItem>
+            </>
+          )}
         </ul>
       )}
+
+      {/* Required folder warning */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete Folder"
+        message={'Are you sure you want to delete this folder and all of its contents?'}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onClose={(confirmed) => {
+          setConfirmOpen(false);
+          if (confirmed && pendingFolderId) {
+            void actuallyDeleteFolder(pendingFolderId);
+          }
+          setPendingFolderId(null);
+        }}
+      />
     </nav>
   );
 }
@@ -250,8 +404,10 @@ function buildTree(folders: Folder[], docs: Doc[], chars: Character[]): TreeNode
         if (a.kind === "folder") return -1;
         if (b.kind === "folder") return 1;
       }
-      const an = a.kind === "folder" ? a.name : a.kind === "doc" ? (a as any).title : (a as any).name;
-      const bn = b.kind === "folder" ? b.name : b.kind === "doc" ? (b as any).title : (b as any).name;
+      const an =
+        a.kind === "folder" ? a.name : a.kind === "doc" ? (a as any).title : (a as any).name;
+      const bn =
+        b.kind === "folder" ? b.name : b.kind === "doc" ? (b as any).title : (b as any).name;
       return an.localeCompare(bn);
     });
 
@@ -268,7 +424,7 @@ function TreeList(props: {
   onCreateDoc: (folderId: string | null) => void;
   onCreateFolder: (parentId: string | null) => void;
   onCreateCharacter: (folderId: string | null) => void;
-  onContextMenu: (e: React.MouseEvent, folderId: string | null) => void;
+  onContextMenu: (e: React.MouseEvent, target: ContextTarget) => void;
   depth?: number;
 }) {
   const {
@@ -296,7 +452,7 @@ function TreeList(props: {
           <li
             key={n.id}
             style={{ marginBottom: "8px" }}
-            onContextMenu={(e) => onContextMenu(e, n.id)}   // folder-scoped menu
+            onContextMenu={(e) => onContextMenu(e, { kind: "folder", id: n.id })}
           >
             <div
               style={{
@@ -337,7 +493,7 @@ function TreeList(props: {
               background: snap.currentDocId === n.id ? "rgba(0,0,0,0.06)" : undefined,
               borderRadius: snap.currentDocId === n.id ? 6 : undefined,
             }}
-            onContextMenu={(e) => onContextMenu(e, null)}  // allow right-click at this level too
+            onContextMenu={(e) => onContextMenu(e, { kind: "doc", id: n.id })}
           >
             <a
               href="#"
@@ -361,7 +517,7 @@ function TreeList(props: {
               background: snap.currentCharId === n.id ? "rgba(0,0,0,0.06)" : undefined,
               borderRadius: snap.currentCharId === n.id ? 6 : undefined,
             }}
-            onContextMenu={(e) => onContextMenu(e, null)}
+            onContextMenu={(e) => onContextMenu(e, { kind: "character", id: n.id })}
           >
             <a
               href="#"
