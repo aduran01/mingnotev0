@@ -1,90 +1,118 @@
-/* ===== PASTEL KAWAII THEME ===== */
+/*
+ * Global theme definitions.
+ *
+ * The application embraces a soft pastel palette inspired by Japanese kawaii
+ * aesthetics.  Colours are purposefully subtle to let content stand out and
+ * to reduce eye strain.  Spacing variables follow an 8pt modular scale for
+ * consistent rhythm across the UI.  Typography uses a single sans serif
+ * family to project warmth and readability, with a modular scale for
+ * headings.  These tokens underpin the design system used throughout the
+ * application.
+ */
+
 :root {
-  /* Palette */
-  --bg: #fffafc;              /* warm white with pink tint */
-  --fg: #111;              /* soft plum text */
-  --muted: #a18aaa;           /* lavender-gray */
-  --accent: #f9a8d4;          /* sakura pink */
-  --accent-2: #a5f3fc;        /* sky aqua */
-  --accent-3: #fef9c3;        /* pastel yellow */
-  --accent-fg: #4b4453;
-  --line: 1.5;
+  /* colour palette */
+  --color-bg: #fff8f9;        /* off‑white base with a hint of pink */
+  --color-surface: #fffafc;    /* card and sheet backgrounds */
+  --color-chrome: #ffeef7;     /* headers, sidebars */
+  --color-primary: #f9a8d4;    /* sakura pink for primary actions */
+  --color-secondary: #fef9c3;  /* soft pastel yellow for secondary actions */
+  --color-accent: #a5f3fc;     /* aqua accent used sparingly */
+  --color-border: #f8c8dc;     /* pale pink for lines and outlines */
+  --color-text: #4b4453;       /* dark lavender text for high contrast */
+  --color-muted: #a18aaa;      /* subdued text (placeholders, metadata) */
+  --color-danger: #f08080;     /* gentle coral red for destructive actions */
 
-  /* Surfaces */
-  --chrome: #ffeef7;          /* soft pink header/sidebar */
-  --card: #fffafc;
-  --border: #f8c8dc;          /* pale pink border */
-  --shadow: 0 2px 6px rgba(249, 168, 212, 0.3);
+  /* spacing (8pt scale) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
 
-  /* Typography & radius */
-  --font-sans: "Quicksand", "Poppins", "Nunito", ui-sans-serif;
-  --font-mono: "Fira Code", "JetBrains Mono", monospace;
-  --text-size: 17px;
-  --line: 1.7;
-  --radius: 14px;
+  /* typography */
+  --font-family-base: "Poppins", "Quicksand", ui-sans-serif;
+  --font-size-base: 1rem;
+  --font-size-sm: 0.875rem;
+  --font-size-lg: 1.25rem;
+  --line-height-base: 1.6;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.1);
+  --transition-fast: 0.15s ease;
+  --transition-med: 0.3s ease;
 }
 
-
-
-html, body, #root, .app-shell {
+html,
+body,
+#root,
+.app-shell {
   height: 100%;
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font-sans);
-  font-size: var(--text-size);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
   letter-spacing: 0.1px;
 }
 
 /* Header */
 header {
-  background: var(--chrome);
-  box-shadow: var(--shadow);
-  border-bottom: 1px solid var(--border);
+  background: var(--color-chrome);
+  box-shadow: var(--shadow-md);
+  border-bottom: 1px solid var(--color-border);
 }
 
 /* Buttons */
 button {
   appearance: none;
-  border: 2px solid var(--border);
-  background: var(--accent-3);
-  color: var(--fg);
-  padding: 8px 14px;
-  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-secondary);
+  color: var(--color-text);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   font-weight: 600;
-  transition: all 0.2s ease;
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 button:hover {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--color-primary);
+  color: var(--color-text);
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(249, 168, 212, 0.4);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
+}
+button:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 button:focus-visible {
-  outline: 3px dashed var(--accent-2);
-  outline-offset: 3px;
+  outline: 2px dashed var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* Sidebar */
 aside {
-  background: var(--chrome);
-  border-right: 1px solid var(--border);
-  box-shadow: inset -2px 0 3px rgba(255, 182, 193, 0.1);
+  background: var(--color-chrome);
+  border-right: 1px solid var(--color-border);
+  box-shadow: inset -1px 0 2px rgba(0, 0, 0, 0.05);
 }
 
-/* Editor */
+/* Cards */
 .card {
-  background: var(--card);
-  box-shadow: var(--shadow);
-  border-radius: var(--radius);
-  transition: background 0.3s ease;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-med);
 }
 
 textarea.editor {
-  font-family: var(--font-mono);
+  font-family: var(--font-family-base);
   font-size: 1rem;
-  padding: 28px;
-  line-height: var(--line);
+  padding: var(--space-4);
+  line-height: var(--line-height-base);
   background: transparent;
   color: inherit;
   border: none;
@@ -95,19 +123,36 @@ textarea.editor {
 }
 
 /* Scrollbars */
-* { scrollbar-color: var(--border) transparent; }
-*::-webkit-scrollbar { height: 10px; width: 10px; }
+* {
+  scrollbar-color: var(--color-border) transparent;
+}
+*::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
 *::-webkit-scrollbar-thumb {
-  background: var(--accent);
-  border-radius: 10px;
-  border: 2px solid var(--bg);
+  background: var(--color-primary);
+  border-radius: 8px;
+  border: 2px solid var(--color-bg);
 }
 
 /* Links / highlights */
-a { color: var(--accent); }
-::selection { background: var(--accent-2); color: var(--fg); }
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+::selection {
+  background: var(--color-accent);
+  color: var(--color-text);
+}
 
-/* Gentle fade animations */
-button, textarea, header, aside {
-  transition: background 0.2s ease, color 0.2s ease;
+/* Global transitions */
+button,
+textarea,
+header,
+aside {
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
