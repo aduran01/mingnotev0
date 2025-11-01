@@ -8,7 +8,7 @@ export default function Editor() {
   const s = useSnapshot(state);
   const timer = useRef<number | undefined>(undefined);
 
-  // Autosave docs every 5s (not active when in character mode)
+  // Auto-save every 5s
   useEffect(() => {
     if (timer.current) window.clearInterval(timer.current);
     timer.current = window.setInterval(async () => {
@@ -28,22 +28,48 @@ export default function Editor() {
     state.editor.lastSaved = Date.now();
   };
 
-  // Switcher
   if (s.currentCharId) return <CharacterEditor />;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div className="card" style={{ margin: 12, padding: 12, flex: 1, display: "flex", minHeight: 0 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        width: "100%",
+        maxWidth: "90%",     // fill more of the available width
+        margin: "0 auto",
+      }}
+    >
+      <div
+        className="card"
+        style={{
+          flex: 1,
+          margin: "16px",
+          padding: "0",
+          height: "80vh",          // ⬆️ MUCH taller box (vertical size)
+          overflow: "auto",        // ⬅️ scrolls inside the box
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <textarea
           className="editor"
           style={{
+            flex: 1,
             width: "100%",
             height: "100%",
+            padding: "20px",
             resize: "none",
             outline: "none",
             border: "none",
             background: "transparent",
             lineHeight: 1.6,
+            fontSize: "1rem",
+            boxSizing: "border-box",
+            overflow: "auto",      // ⬅️ ensures text scrolls inside box
+            whiteSpace: "pre-wrap",
+            wordWrap: "break-word",
           }}
           value={s.editor.md}
           onChange={(e) => (state.editor.md = e.target.value)}
@@ -52,7 +78,15 @@ export default function Editor() {
           aria-label="Markdown editor"
         />
       </div>
-      <div style={{ fontSize: 12, color: "var(--muted)", padding: "0 16px 12px", alignSelf: "flex-end" }}>
+
+      <div
+        style={{
+          fontSize: 12,
+          color: "var(--muted)",
+          padding: "0 16px 12px",
+          alignSelf: "flex-end",
+        }}
+      >
         Saved {s.editor.lastSaved ? new Date(s.editor.lastSaved).toLocaleTimeString() : "—"}
       </div>
     </div>

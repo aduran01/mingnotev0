@@ -8,6 +8,7 @@
   --accent-2: #a5f3fc;        /* sky aqua */
   --accent-3: #fef9c3;        /* pastel yellow */
   --accent-fg: #4b4453;
+  --line: 1.5;
 
   /* Surfaces */
   --chrome: #ffeef7;          /* soft pink header/sidebar */

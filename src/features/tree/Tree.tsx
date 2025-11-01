@@ -38,25 +38,21 @@ export default function Tree() {
     if (snapshot.projectPath) refresh();
   }, [snapshot.projectPath, refresh]);
 
-  const rootNodes = useMemo(
-    () => buildTree(folders, docs, characters),
-    [folders, docs, characters]
-  );
+  const rootNodes = useMemo(() => buildTree(folders, docs, characters), [folders, docs, characters]);
 
-  const toggle = (id: string) =>
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const createFolder = async (parentId: string | null) => {
-    if (!state.projectPath) return alert("Open/create a project first.");
-    const name = prompt("New folder name?") || "New Folder";
+    if (!state.projectPath) return alert("Open or create a project first.");
+    const name = prompt("New folder name?", "") || "New folder";
     await newFolder(state.projectPath, name, parentId);
     await refresh();
     if (parentId) setExpanded((e) => ({ ...e, [parentId]: true }));
   };
 
   const createDoc = async (folderId: string | null) => {
-    if (!state.projectPath) return alert("Open/create a project first.");
-    const title = prompt("New document title?") || "Untitled";
+    if (!state.projectPath) return alert("Open or create a project first.");
+    const title = prompt("New document title?", "") || "Untitled document";
     const id = await newDoc(state.projectPath, title, folderId);
     await refresh();
     state.currentDocId = id;
@@ -65,8 +61,8 @@ export default function Tree() {
   };
 
   const createCharacterTab = async (folderId: string | null) => {
-    if (!state.projectPath) return alert("Open/create a project first.");
-    const name = prompt("New character name?") || "New Character";
+    if (!state.projectPath) return alert("Open or create a project first.");
+    const name = prompt("New character name?", "") || "New character";
     const id = await newCharacter(state.projectPath, name, folderId);
     await refresh();
     state.currentCharId = id;
@@ -75,13 +71,19 @@ export default function Tree() {
   };
 
   return (
-    <div style={{ padding: 12 }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button onClick={() => createDoc(null)} disabled={!snapshot.projectPath}>+ Doc</button>
-        <button onClick={() => createFolder(null)} disabled={!snapshot.projectPath}>+ Folder</button>
-        <button onClick={() => createCharacterTab(null)} disabled={!snapshot.projectPath}>+ Character</button>
+    <nav aria-label="Project navigation" style={{ padding: "16px" }}>
+      {/* Top-level add buttons with sentence-case labels and consistent spacing */}
+      <div style={{ marginBottom: "16px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <button onClick={() => createDoc(null)} disabled={!snapshot.projectPath}>
+          + Add document
+        </button>
+        <button onClick={() => createFolder(null)} disabled={!snapshot.projectPath}>
+          + Add folder
+        </button>
+        <button onClick={() => createCharacterTab(null)} disabled={!snapshot.projectPath}>
+          + Add character
+        </button>
       </div>
-
       <TreeList
         nodes={rootNodes}
         expanded={expanded}
@@ -90,7 +92,12 @@ export default function Tree() {
         onCreateFolder={createFolder}
         onCreateCharacter={createCharacterTab}
       />
-    </div>
+      {rootNodes.length === 0 && (
+        <p style={{ opacity: 0.7, marginTop: "12px" }}>
+          <em>No items yet. Use the buttons above to add content.</em>
+        </p>
+      )}
+    </nav>
   );
 }
 
@@ -116,8 +123,12 @@ function buildTree(folders: Folder[], docs: Doc[], chars: Character[]): TreeNode
   });
 
   const rootFolders = (childrenByParent[ROOT_KEY] || []).map(makeFolderNode);
-  const rootDocs = (docsByFolder[ROOT_KEY] || []).map((d) => ({ kind: "doc", id: d.id, title: d.title }) as TreeNode);
-  const rootChars = (charsByFolder[ROOT_KEY] || []).map((c) => ({ kind: "character", id: c.id, name: c.name }) as TreeNode);
+  const rootDocs = (docsByFolder[ROOT_KEY] || []).map(
+    (d) => ({ kind: "doc", id: d.id, title: d.title }) as TreeNode,
+  );
+  const rootChars = (charsByFolder[ROOT_KEY] || []).map(
+    (c) => ({ kind: "character", id: c.id, name: c.name }) as TreeNode,
+  );
 
   const sortNodes = (nodes: TreeNode[]) =>
     nodes.slice().sort((a, b) => {
@@ -145,22 +156,65 @@ function TreeList(props: {
   onCreateCharacter: (folderId: string | null) => void;
   depth?: number;
 }) {
-  const { nodes, expanded, onToggle, onCreateDoc, onCreateFolder, onCreateCharacter, depth = 0 } = props;
+  const {
+    nodes,
+    expanded,
+    onToggle,
+    onCreateDoc,
+    onCreateFolder,
+    onCreateCharacter,
+    depth = 0,
+  } = props;
 
   return (
-    <ul style={{ listStyle: "none", margin: 0, paddingLeft: depth === 0 ? 0 : 14 }}>
+    <ul
+      style={{
+        listStyle: "none",
+        margin: 0,
+        paddingLeft: depth === 0 ? 0 : 16,
+      }}
+    >
       {nodes.map((n) =>
         n.kind === "folder" ? (
-          <li key={n.id} style={{ marginBottom: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, userSelect: "none" }}>
+          <li key={n.id} style={{ marginBottom: "8px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                userSelect: "none",
+              }}
+            >
               <FolderCaret isOpen={!!expanded[n.id]} onClick={() => onToggle(n.id)} />
-              <span style={{ fontWeight: 700, cursor: "pointer" }} onClick={() => onToggle(n.id)} title={n.name}>
+              <span
+                style={{ fontWeight: 600, cursor: "pointer" }}
+                onClick={() => onToggle(n.id)}
+                title={n.name}
+              >
                 📁 {n.name}
               </span>
-              <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                <small role="button" style={miniBtnStyle} onClick={() => onCreateDoc(n.id)}>+ doc</small>
-                <small role="button" style={miniBtnStyle} onClick={() => onCreateFolder(n.id)}>+ folder</small>
-                <small role="button" style={miniBtnStyle} onClick={() => onCreateCharacter(n.id)}>+ char</small>
+              <div style={{ marginLeft: "auto", display: "flex", gap: "4px" }}>
+                <button
+                  onClick={() => onCreateDoc(n.id)}
+                  style={miniBtnStyle}
+                  aria-label="Add document to folder"
+                >
+                  + doc
+                </button>
+                <button
+                  onClick={() => onCreateFolder(n.id)}
+                  style={miniBtnStyle}
+                  aria-label="Add subfolder"
+                >
+                  + folder
+                </button>
+                <button
+                  onClick={() => onCreateCharacter(n.id)}
+                  style={miniBtnStyle}
+                  aria-label="Add character"
+                >
+                  + char
+                </button>
               </div>
             </div>
 
@@ -177,7 +231,7 @@ function TreeList(props: {
             )}
           </li>
         ) : n.kind === "doc" ? (
-          <li key={n.id} style={{ marginBottom: 3, paddingLeft: 22 }}>
+          <li key={n.id} style={{ marginBottom: "6px", paddingLeft: "20px" }}>
             <a
               href="#"
               onClick={(e) => {
@@ -192,7 +246,7 @@ function TreeList(props: {
             </a>
           </li>
         ) : (
-          <li key={n.id} style={{ marginBottom: 3, paddingLeft: 22 }}>
+          <li key={n.id} style={{ marginBottom: "6px", paddingLeft: "20px" }}>
             <a
               href="#"
               onClick={(e) => {
@@ -206,19 +260,19 @@ function TreeList(props: {
               👤 {n.name}
             </a>
           </li>
-        )
-      )}
-
-      {nodes.length === 0 && depth === 0 && (
-        <li style={{ opacity: 0.7, padding: "4px 0" }}>
-          <em>No items yet. Use “+ Doc”, “+ Folder” or “+ Character”.</em>
-        </li>
+        ),
       )}
     </ul>
   );
 }
 
-function FolderCaret({ isOpen, onClick }: { isOpen: boolean; onClick: () => void }) {
+function FolderCaret({
+  isOpen,
+  onClick,
+}: {
+  isOpen: boolean;
+  onClick: () => void;
+}) {
   return (
     <span
       onClick={onClick}
@@ -238,11 +292,13 @@ function FolderCaret({ isOpen, onClick }: { isOpen: boolean; onClick: () => void
   );
 }
 
+// Slightly larger mini-button style for better click targets
 const miniBtnStyle: React.CSSProperties = {
-  padding: "2px 6px",
+  padding: "4px 6px",
   border: "1px solid var(--border)",
   borderRadius: 8,
   cursor: "pointer",
   background: "var(--card)",
   color: "var(--fg)",
+  fontSize: "0.75rem",
 };
