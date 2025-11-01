@@ -130,36 +130,40 @@ export default function CharacterEditor() {
     state.charEditor.lastSaved = Date.now();
   };
 
-  const onPickImage = async () => {
-    const picked = await open({
-      multiple: false,
-      directory: false,
-      filters: [
-        { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
-        { name: "PDF", extensions: ["pdf"] },
-        { name: "All", extensions: ["*"] },
-      ],
-    });
-    if (!picked || typeof picked !== "string") return;
+const onPickImage = async () => {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [
+      { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
+      { name: "PDF", extensions: ["pdf"] },
+      { name: "All", extensions: ["*"] },
+    ],
+  });
+  if (!picked || typeof picked !== "string") return;
 
-    // Copy file into the project so it stays portable
-    const destAbsPath = await importCharacterImage(state.projectPath, state.currentCharId, picked);
+  // Import returns a relative path (e.g. "assets/characters/<id>/pic.png")
+  const destRelPath = await importCharacterImage(
+    state.projectPath,
+    state.currentCharId,
+    picked,
+  );
 
-    // Persist and update UI
-    state.charEditor.image = destAbsPath; // absolute path
-    await saveCharacter(state.projectPath, s.currentCharId, {
-      age: state.charEditor.age,
-      nationality: state.charEditor.nationality,
-      sexuality: state.charEditor.sexuality,
-      height: state.charEditor.height,
-      attributes: state.charEditor.attributes,
-      image: destAbsPath,
-    });
-    state.charEditor.lastSaved = Date.now();
+  // Persist and update UI
+  state.charEditor.image = destRelPath;
+  await saveCharacter(state.projectPath, state.currentCharId, {
+    age: state.charEditor.age,
+    nationality: state.charEditor.nationality,
+    sexuality: state.charEditor.sexuality,
+    height: state.charEditor.height,
+    attributes: state.charEditor.attributes,
+    image: destRelPath,
+  });
+  state.charEditor.lastSaved = Date.now();
 
-    // Force refresh of derived URL immediately
-    setImageUrl(await buildDisplayUrl(destAbsPath));
-  };
+  // Immediately refresh the preview
+  setImageUrl(await buildDisplayUrl(destRelPath));
+};
 
   return (
     <div

@@ -91,9 +91,9 @@ export default function Tree() {
     state.currentCharId = id;
     state.currentDocId = "";
   };
-  const selectFolder = (id: string) => {
-    // optional: you can store a currentFolderId if you want folder highlighting
-    // (not strictly required)
+  const selectFolder = (_id: string) => {
+  // no-op for now; mark as read so TS doesn't error
+  void _id;
   };
 
   // Prompt helper

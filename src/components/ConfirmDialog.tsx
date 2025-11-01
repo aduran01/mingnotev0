@@ -1,5 +1,3 @@
-// src/components/ConfirmDialog.tsx
-import React from "react";
 
 type Props = {
   open: boolean;
