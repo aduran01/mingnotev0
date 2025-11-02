@@ -7,37 +7,98 @@ import { saveDoc } from "../../lib/ipc";
 import CharacterEditor from "./CharacterEditor";
 import WordCounter from "./WordCounter";
 
-/**
- * Editor component with toolbar, autosave and live counters.
- * Inline comments (`// comment //`) are ignored in the counts
- * and styled specially in the preview.
- */
 export default function Editor() {
   const s = useSnapshot(state);
-  const timer = useRef<number | undefined>(undefined);
+  const timerRef = useRef<number | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Autosave on interval
+  // Autosave every 5 seconds.  Runs once and refers to latest state via the proxy.
   useEffect(() => {
-    if (timer.current) window.clearInterval(timer.current);
-    timer.current = window.setInterval(async () => {
-      if (!s.currentDocId) return;
-      await saveDoc(state.projectPath, s.currentDocId, s.editor.md);
+    timerRef.current = window.setInterval(async () => {
+      if (!state.currentDocId) return;
+      await saveDoc(state.projectPath, state.currentDocId, state.editor.md);
       state.editor.lastSaved = Date.now();
     }, 5000) as unknown as number;
     return () => {
-      if (timer.current) window.clearInterval(timer.current);
+      if (timerRef.current) window.clearInterval(timerRef.current);
     };
-  }, [s.currentDocId, s.editor.md]);
+  }, []);
+
+  // Toggle the character counter via Ctrl/⌘+Shift+C (runs once)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") {
+        state.editor.showCharCount = !state.editor.showCharCount;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Compute word/character counts ignoring anything between //...//
+  const { wordCount, charCount } = React.useMemo(() => {
+    const text = s.editor.md || "";
+    const stripped = text.replace(/\/\/[\s\S]*?\/\/\s*/g, "");
+    const words = stripped.trim().split(/\s+/).filter(Boolean);
+    const wc = stripped.trim() ? words.length : 0;
+    const cc = stripped.length;
+    return { wordCount: wc, charCount: cc };
+  }, [s.editor.md]);
+
+  // Preprocess markdown to style inline comments, then convert to HTML
+  const renderedHtml = React.useMemo(() => {
+    const raw = s.editor.md || "";
+    const processed = raw.replace(/\/\/([\s\S]*?)\/\/\s*/g, (_, inner) => {
+      const content = String(inner).trim();
+      return `<span style="background:#fce7f3; padding:2px 4px; border-radius:4px; font-weight:bold;">${content}</span>`;
+    });
+    try {
+      return marked.parse(processed);
+    } catch {
+      return `<pre>${processed}</pre>`;
+    }
+  }, [s.editor.md]);
+
+  // Text selection helper for bold/italic buttons
+  const wrapSelection = (prefix: string, suffix: string) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const text = state.editor.md;
+    const before = text.slice(0, start);
+    const selected = text.slice(start, end);
+    const after = text.slice(end);
+    state.editor.md = before + prefix + selected + suffix + after;
+    requestAnimationFrame(() => {
+      if (el) {
+        const pos = start + prefix.length + selected.length + suffix.length;
+        el.selectionStart = el.selectionEnd = pos;
+        el.focus();
+      }
+    });
+  };
+
+  const applyBold = () => wrapSelection("**", "**");
+  const applyItalic = () => wrapSelection("_", "_");
+  const handleFontChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    state.editor.font = e.target.value;
+  };
+  const handleLineSpacingChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    state.editor.lineHeight = parseFloat(e.target.value);
+  };
 
   const onBlur = async () => {
-    if (!s.currentDocId) return;
-    await saveDoc(state.projectPath, s.currentDocId, s.editor.md);
+    if (!state.currentDocId) return;
+    await saveDoc(state.projectPath, state.currentDocId, state.editor.md);
     state.editor.lastSaved = Date.now();
   };
 
-  // Stop editing if no project or editing a character
-  if (!s.projectPath) {
+  // Decide what to render after all hooks are called
+  const noProject = !s.projectPath;
+  const editingCharacter = !!s.currentCharId;
+
+  if (noProject) {
     return (
       <div
         style={{
@@ -53,70 +114,10 @@ export default function Editor() {
       </div>
     );
   }
-  if (s.currentCharId) return <CharacterEditor />;
 
-  // Compute counts, ignoring text between // and // (including newlines)
-  const { wordCount, charCount } = React.useMemo(() => {
-    const text = s.editor.md || "";
-    // Remove inline comments enclosed in //...//
-    const stripped = text.replace(/\/\/[\s\S]*?\/\/\s*/g, "");
-    const words = stripped.trim().split(/\s+/).filter(Boolean);
-    const wc = stripped.trim() ? words.length : 0;
-    const cc = stripped.length;
-    return { wordCount: wc, charCount: cc };
-  }, [s.editor.md]);
-
-  // Keyboard shortcut to toggle character count
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") {
-        state.editor.showCharCount = !state.editor.showCharCount;
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
-
-  // Helper to wrap selection for bold/italic
-  const wrapSelection = (prefix: string, suffix: string) => {
-    const el = textareaRef.current;
-    if (!el) return;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const text = s.editor.md;
-    const before = text.slice(0, start);
-    const selected = text.slice(start, end);
-    const after = text.slice(end);
-    state.editor.md = before + prefix + selected + suffix + after;
-    requestAnimationFrame(() => {
-      if (el) {
-        const pos = start + prefix.length + selected.length + suffix.length;
-        el.selectionStart = el.selectionEnd = pos;
-        el.focus();
-      }
-    });
-  };
-
-  // Toolbar handlers
-  const applyBold = () => wrapSelection("**", "**");
-  const applyItalic = () => wrapSelection("_", "_");
-  const handleFontChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    state.editor.font = e.target.value;
-  };
-  const handleLineSpacingChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    state.editor.lineHeight = parseFloat(e.target.value);
-  };
-
-  // Preprocess markdown for inline comments (// comment //) before rendering.
-  const renderedHtml = React.useMemo(() => {
-    const raw = s.editor.md || "";
-    // Replace //comment// with a styled span; trim the content inside
-    const processed = raw.replace(/\/\/([\s\S]*?)\/\/\s*/g, (_, inner) => {
-      const content = String(inner).trim();
-      return `<span style="background:#fce7f3; padding:2px 4px; border-radius:4px; font-weight:bold;">${content}</span>`;
-    });
-    return marked.parse(processed);
-  }, [s.editor.md]);
+  if (editingCharacter) {
+    return <CharacterEditor />;
+  }
 
   return (
     <div
@@ -167,7 +168,6 @@ export default function Editor() {
         >
           I
         </button>
-        {/* Font selector */}
         <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
           Font:
           <select value={s.editor.font} onChange={handleFontChange}>
@@ -178,7 +178,6 @@ export default function Editor() {
             ))}
           </select>
         </label>
-        {/* Line spacing selector */}
         <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
           Line spacing:
           <select
