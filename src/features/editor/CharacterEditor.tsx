@@ -23,11 +23,11 @@ function normSlashes(p: string): string {
 
 /* ------------------------------ types ------------------------------ */
 
-type Character = {
+/*type Character = {
   id: string;
   name: string;
-  imagePath?: string;  //relative (preferred) or absolute (fallback)
-};
+  imagePath?: string;  
+}; */
 
 /* ------------------------------ component ------------------------------ */
 
