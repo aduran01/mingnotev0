@@ -26,7 +26,7 @@ function normSlashes(p: string): string {
 type Character = {
   id: string;
   name: string;
-  imagePath?: string; // relative (preferred) or absolute (fallback)
+  imagePath?: string;  //relative (preferred) or absolute (fallback)
 };
 
 /* ------------------------------ component ------------------------------ */

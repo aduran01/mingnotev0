@@ -53,15 +53,20 @@ export default function Editor() {
   }
   if (s.currentCharId) return <CharacterEditor />;
 
-  // Compute counts, ignoring text between // and // (including newlines)
-  const { wordCount, charCount } = React.useMemo(() => {
-    const text = s.editor.md || "";
-    const stripped = text.replace(/\/\/[^]*?\/\/\//g, "");
-    const words = stripped.trim().split(/\s+/).filter(Boolean);
-    const wc = stripped.trim() ? words.length : 0;
-    const cc = stripped.length;
-    return { wordCount: wc, charCount: cc };
-  }, [s.editor.md]);
+ // Compute counts, ignoring text between // and // (including newlines)
+const { wordCount, charCount } = React.useMemo(() => {
+  const text = s.editor.md || "";
+  // Remove inline comments enclosed in //...//
+  // [\s\S] matches any character, including newlines, non‑greedy
+  const stripped = text.replace(/\/\/[\s\S]*?\/\/\s*/g, "");
+
+  // Split on whitespace to count words; .filter(Boolean) removes empty strings
+  const words = stripped.trim().split(/\s+/).filter(Boolean);
+  const wc = stripped.trim() ? words.length : 0;
+  const cc = stripped.length;
+
+  return { wordCount: wc, charCount: cc };
+}, [s.editor.md]);
 
   // Keyboard shortcut to toggle character count
   useEffect(() => {
