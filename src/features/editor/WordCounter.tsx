@@ -1,11 +1,36 @@
 import React, { useEffect, useRef, useState } from "react";
 
 interface WordCounterProps {
+  /**
+   * The numeric value to display.  For example, the word count or
+   * character count.
+   */
   count: number;
+  /** Label shown next to the count. */
   label: string;
+  /**
+   * Optional background colour.  Defaults to a soft pink in keeping
+   * with the MingNote palette.
+   */
   color?: string;
+  /**
+   * Which side of the viewport the counter should attach to.  Left
+   * counters position themselves relative to the left edge; right
+   * counters to the right edge.
+   */
   anchor?: "left" | "right";
+  /**
+   * Custom key used to persist the counter's position across
+   * sessions.  If omitted, a key is derived from the label.
+   */
   storageKey?: string;
+  /**
+   * Optional click handler.  When provided, clicking the counter
+   * invokes this callback rather than initiating a drag.  This is
+   * used by the Editor to toggle the visibility of the character
+   * count when the word count is clicked.
+   */
+  onClick?: () => void;
 }
 
 /**
@@ -19,6 +44,7 @@ const WordCounter: React.FC<WordCounterProps> = ({
   color = "#f9a8d4",
   anchor = "left",
   storageKey,
+  onClick,
 }) => {
   const key =
     storageKey || `mingnote-${label.toLowerCase().replace(/\s+/g, "")}--pos`;
@@ -51,7 +77,14 @@ const WordCounter: React.FC<WordCounterProps> = ({
   const init = useRef({ x: 0, y: 0 });
 
   const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Prevent default to stop text selection on double-click
     e.preventDefault();
+    // If a click handler is provided, invoke it and return.  Do not
+    // start a drag interaction when clicking to toggle.
+    if (onClick) {
+      onClick();
+      return;
+    }
     isDragging.current = true;
     start.current = { x: e.clientX, y: e.clientY };
     init.current = { ...pos };
@@ -81,12 +114,16 @@ const WordCounter: React.FC<WordCounterProps> = ({
     borderRadius: 4,
     fontSize: "0.8rem",
     userSelect: "none",
-    cursor: "move",
+    cursor: onClick ? "pointer" : "move",
     zIndex: 1000,
   };
 
   return (
-    <div style={style} onMouseDown={onMouseDown} aria-label={`${label} counter`}>
+    <div
+      style={style}
+      onMouseDown={onMouseDown}
+      aria-label={`${label} counter`}
+    >
       {label}: {count}
     </div>
   );

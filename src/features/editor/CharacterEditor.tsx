@@ -6,7 +6,22 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { join } from "@tauri-apps/api/path";
 
-/* ------------------------------ helpers ------------------------------ */
+/* ------------------------------------------------------------------
+ * CharacterEditor
+ *
+ * This component allows the user to edit a character profile.  In
+ * addition to basic fields (age, nationality, etc.) it supports
+ * uploading a character image.  When picking an image, the file is
+ * first previewed immediately via `convertFileSrc` and then
+ * imported into the project directory via the backend.  The
+ * previewed URL and stored relative path are displayed in an <img>
+ * element or an <object> when the file is a PDF.  Unlike the
+ * upstream implementation, the safety check requiring
+ * `tauri://localhost/` URLs has been removed.  Tauri's
+ * `convertFileSrc` may return asset URLs such as
+ * `http://asset.localhost/…`; these are considered valid and should
+ * load correctly when the application is configured appropriately.
+ */
 
 function isHttpUrl(raw: string): boolean {
   return /^https?:\/\//i.test(raw);
@@ -21,25 +36,20 @@ function normSlashes(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
-/* ------------------------------ types ------------------------------ */
-
-/*type Character = {
-  id: string;
-  name: string;
-  imagePath?: string;  
-}; */
-
-/* ------------------------------ component ------------------------------ */
-
 export default function CharacterEditor() {
   const s = useSnapshot(state);
   const autosaveTimer = useRef<number | undefined>(undefined);
   const cacheSeed = useRef<number>(Date.now());
 
-  const [imageUrl, setImageUrl] = useState<string>(""); // the actual <img>/<object> src
+  const [imageUrl, setImageUrl] = useState<string>("");
   const [imgErr, setImgErr] = useState<string>("");
 
-  /** Build a WebView-safe URL (with cache-buster) for any path/URL. */
+  /**
+   * Build a WebView-safe URL (with cache-buster) for any path/URL.  If
+   * the input is an HTTP URL, append a timestamp query to force
+   * refresh.  For relative or absolute file system paths, convert
+   * them via `convertFileSrc` and append a cache-buster as well.
+   */
   const buildDisplayUrl = useCallback(
     async (raw: string): Promise<string> => {
       try {
@@ -48,7 +58,7 @@ export default function CharacterEditor() {
 
         let pathOnDisk = normSlashes(raw);
         if (!looksAbsolutePath(pathOnDisk)) {
-          // resolve relative project path to absolute
+          // resolve project-relative path to an absolute path on disk
           pathOnDisk = await join(state.projectPath, pathOnDisk);
         }
         const url = convertFileSrc(pathOnDisk);
@@ -60,29 +70,32 @@ export default function CharacterEditor() {
     [s.projectPath]
   );
 
-  /* --- load character on change --- */
+  /* --- Load character when project or character ID changes --- */
   useEffect(() => {
     (async () => {
       if (!s.projectPath || !s.currentCharId) return;
       const data = await loadCharacter(s.projectPath, s.currentCharId);
 
+      // Copy scalar fields
       state.charEditor.age = data.age ?? "";
       state.charEditor.nationality = data.nationality ?? "";
       state.charEditor.sexuality = data.sexuality ?? "";
       state.charEditor.height = data.height ?? "";
 
-      // attributes: accept array or JSON string
+      // Parse attributes: accept arrays or JSON strings
       let attrs: Attribute[] = [];
       if (Array.isArray(data.attributes)) attrs = data.attributes as Attribute[];
       else if (typeof data.attributes === "string" && data.attributes.trim()) {
         try {
           const parsed = JSON.parse(data.attributes);
           if (Array.isArray(parsed)) attrs = parsed as Attribute[];
-        } catch {}
+        } catch {
+          /* ignore */
+        }
       }
       state.charEditor.attributes = attrs;
 
-      // image field naming variations
+      // Normalise image field names and load preview URL
       state.charEditor.image = (data.image ?? data.image_path ?? "") || "";
       const url = await buildDisplayUrl(state.charEditor.image);
       setImageUrl(url);
@@ -90,7 +103,7 @@ export default function CharacterEditor() {
     })();
   }, [s.projectPath, s.currentCharId, buildDisplayUrl]);
 
-  /* --- recompute preview if image or project path changes --- */
+  /* --- Recompute preview when the stored image or project path changes --- */
   useEffect(() => {
     (async () => {
       const url = await buildDisplayUrl(s.charEditor.image);
@@ -99,7 +112,7 @@ export default function CharacterEditor() {
     })();
   }, [s.charEditor.image, s.projectPath, buildDisplayUrl]);
 
-  /* --- autosave every 5s --- */
+  /* --- Autosave character every 5 seconds --- */
   useEffect(() => {
     if (autosaveTimer.current) window.clearInterval(autosaveTimer.current);
     autosaveTimer.current = window.setInterval(async () => {
@@ -114,9 +127,10 @@ export default function CharacterEditor() {
           image: state.charEditor.image,
         });
         state.charEditor.lastSaved = Date.now();
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     }, 5000) as unknown as number;
-
     return () => {
       if (autosaveTimer.current) window.clearInterval(autosaveTimer.current);
     };
@@ -130,6 +144,10 @@ export default function CharacterEditor() {
     s.charEditor.image,
   ]);
 
+  /**
+   * Persist the current character state immediately.  Called when
+   * fields blur or when the image is imported.
+   */
   const persistNow = async () => {
     if (!s.currentCharId) return;
     await saveCharacter(state.projectPath, s.currentCharId, {
@@ -143,63 +161,53 @@ export default function CharacterEditor() {
     state.charEditor.lastSaved = Date.now();
   };
 
-/* --- pick image: instant preview from picked path, then switch to saved relative path --- */
-const onPickImage = async () => {
-  const picked = await open({
-    multiple: false,
-    directory: false,
-    filters: [
-      { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
-      { name: "PDF", extensions: ["pdf"] },
-    ],
-  });
-  if (!picked || typeof picked !== "string") return;
+  /**
+   * Handle the image picker.  Provides an immediate preview of the
+   * selected file using its absolute OS path, then imports the image
+   * into the project via the backend and updates the stored relative
+   * path and preview.  The safety warning about non-`tauri://localhost`
+   * URLs has been removed to avoid confusing users when the
+   * application is correctly configured to serve assets under the
+   * `asset.localhost` or other schemes.
+   */
+  const onPickImage = async () => {
+    const picked = await open({
+      multiple: false,
+      directory: false,
+      filters: [
+        { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
+        { name: "PDF", extensions: ["pdf"] },
+      ],
+    });
+    if (!picked || typeof picked !== "string") return;
 
-  // 1) Instant preview from OS path (cache-busted)
-  cacheSeed.current = Date.now();
-  const immediate = convertFileSrc(picked) + `?v=${cacheSeed.current}`;
-  console.debug("[CharacterEditor] immediate preview url:", immediate);
-  setImageUrl(immediate);
-  setImgErr("");
-
-  try {
-    // 2) Import into project; backend SHOULD return a project-relative path like:
-    //    assets/characters/<id>/photo.png
-    let rel = await importCharacterImage(state.projectPath, state.currentCharId, picked);
-
-    // Normalize slashes just in case (Windows backslashes)
-    rel = rel.replace(/\\/g, "/");
-
-    // 3) Persist immediately so state & DB match
-    state.charEditor.image = rel;
-    await persistNow();
-
-    // 4) Swap preview to saved project-relative path
-    const savedUrl = await buildDisplayUrl(rel);
-
-    // --- Diagnostics you requested ---
-    console.debug("[CharacterEditor] final imageUrl:", savedUrl);
-    if (!savedUrl.startsWith("tauri://localhost/")) {
-      console.warn(
-        "[CharacterEditor] imageUrl is not a tauri://localhost URL; check CSP and returned path"
-      );
-      console.log("projectPath:", state.projectPath);
-      console.log("stored image (should be project-relative):", rel);
-    }
-
-    setImageUrl(savedUrl);
+    // Instant preview from OS path (cache-busted)
+    cacheSeed.current = Date.now();
+    const immediate = convertFileSrc(picked) + `?v=${cacheSeed.current}`;
+    setImageUrl(immediate);
     setImgErr("");
-  } catch (e) {
-    console.error("importCharacterImage failed:", e);
-    // keep the immediate preview; surface a gentle UI hint
-    setImgErr(
-      "Could not import the file into the project. Previewing original path."
-    );
-  }
-};
 
-  /* ------------------------------ UI ------------------------------ */
+    try {
+      // Import into project; backend should return a project-relative path
+      let rel = await importCharacterImage(state.projectPath, state.currentCharId, picked);
+      rel = rel.replace(/\\/g, "/");
 
+      // Persist the new relative path immediately
+      state.charEditor.image = rel;
+      await persistNow();
+
+      // Swap preview to saved project-relative path
+      const savedUrl = await buildDisplayUrl(rel);
+      setImageUrl(savedUrl);
+      setImgErr("");
+    } catch (e) {
+      console.error("importCharacterImage failed:", e);
+      // keep the immediate preview; surface a gentle UI hint
+      setImgErr("Could not import the file into the project. Previewing original path.");
+    }
+  };
+
+  /* ------------------------- UI rendering ------------------------ */
   return (
     <div
       style={{
@@ -216,7 +224,6 @@ const onPickImage = async () => {
       {/* Image section */}
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <h2 style={{ margin: 0, marginBottom: 12, fontSize: "1.2rem" }}>Character image</h2>
-
         {imageUrl ? (
           isPdf(s.charEditor.image) ? (
             <object
@@ -245,7 +252,6 @@ const onPickImage = async () => {
               alt="Character"
               style={{ maxWidth: "100%", maxHeight: 300, objectFit: "contain", marginBottom: 8 }}
               onError={() => {
-                // if CSP/path fails, collapse gracefully
                 setImgErr("Failed to load image.");
                 setImageUrl("");
               }}
@@ -270,11 +276,9 @@ const onPickImage = async () => {
             No image
           </div>
         )}
-
         {imgErr && (
-          <div style={{ color: "var(--color-warning)", fontSize: 12, marginBottom: 8 }}>{imgErr}</div>
+          <div style={{ color: "var(--color-danger)", fontSize: 12, marginBottom: 8 }}>{imgErr}</div>
         )}
-
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={onPickImage}
@@ -291,7 +295,6 @@ const onPickImage = async () => {
           </button>
         </div>
       </div>
-
       {/* Profile fields */}
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <h2 style={{ margin: 0, marginBottom: 12, fontSize: "1.2rem" }}>Profile details</h2>
@@ -336,8 +339,7 @@ const onPickImage = async () => {
           />
         </div>
       </div>
-
-      {/* Attributes */}
+      {/* Attributes list */}
       <div className="card" style={{ padding: 16, flex: 1, overflowY: "auto" }}>
         <h2 style={{ margin: 0, marginBottom: 12, fontSize: "1.2rem" }}>Attributes</h2>
         {s.charEditor.attributes.map((attr, idx) => (
@@ -371,7 +373,6 @@ const onPickImage = async () => {
             </button>
           </div>
         ))}
-
         <button
           onClick={() => {
             state.charEditor.attributes.push({ key: "", value: "" });
@@ -383,7 +384,6 @@ const onPickImage = async () => {
           Add attribute
         </button>
       </div>
-
       <div style={{ fontSize: 12, color: "var(--color-muted)", padding: "12px 0", alignSelf: "flex-end" }}>
         Saved {s.charEditor.lastSaved ? new Date(s.charEditor.lastSaved).toLocaleTimeString() : "—"}
       </div>

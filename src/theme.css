@@ -1,13 +1,13 @@
 /*
- * Global theme definitions.
+ * Global theme definitions for MingNote.
  *
- * The application embraces a soft pastel palette inspired by Japanese kawaii
- * aesthetics.  Colours are purposefully subtle to let content stand out and
- * to reduce eye strain.  Spacing variables follow an 8pt modular scale for
- * consistent rhythm across the UI.  Typography uses a single sans serif
- * family to project warmth and readability, with a modular scale for
- * headings.  These tokens underpin the design system used throughout the
- * application.
+ * The application embraces a soft pastel palette inspired by Japanese
+ * kawaii aesthetics.  Colours are purposefully subtle to let
+ * content stand out and to reduce eye strain.  Spacing variables
+ * follow an 8pt modular scale for consistent rhythm across the UI.
+ * Typography uses a single sans serif family to project warmth and
+ * readability, with a modular scale for headings.  These tokens
+ * underpin the design system used throughout the application.
  */
 
 :root {
@@ -155,4 +155,18 @@ textarea,
 header,
 aside {
   transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+/* Inline comments used in the Markdown preview.  They are bolded and
+ * encapsulated in a shaded box to stand out from the main text.
+ */
+.inline-comment {
+  display: inline-block;
+  padding: 2px 4px;
+  margin: 0 2px;
+  background: var(--color-secondary);
+  border-radius: 4px;
+  font-weight: bold;
+  color: var(--color-text);
+  box-shadow: inset 0 0 0 1px var(--color-border);
 }

@@ -2,6 +2,18 @@ import React, { useEffect, useState, useRef } from "react";
 import { useSnapshot } from "valtio";
 import { state } from "../../lib/store";
 
+/*
+ * StickyNotes
+ *
+ * This component provides a floating notes system inspired by physical
+ * sticky notes.  Users can open a panel, add new notes, drag them
+ * around the screen and write freeform text.  Notes are persisted in
+ * `localStorage` keyed by the current project path so they remain
+ * available when switching between documents and even across
+ * sessions.  The notes panel itself is toggled via a fixed button
+ * anchored in the bottom right corner of the viewport.
+ */
+
 const COLORS = ["#ff7eb9", "#ff65a3", "#7afcff", "#feff9c", "#fff740"];
 
 interface Note {
@@ -17,7 +29,7 @@ export default function StickyNotes() {
   const [open, setOpen] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
 
-  // Load notes when projectPath changes
+  // When the project path changes, load notes from localStorage
   useEffect(() => {
     if (!s.projectPath) return;
     try {
@@ -29,7 +41,7 @@ export default function StickyNotes() {
     }
   }, [s.projectPath]);
 
-  // Persist notes on change
+  // Persist notes whenever they change
   useEffect(() => {
     if (!s.projectPath) return;
     try {

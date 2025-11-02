@@ -5,8 +5,22 @@ import { state } from "../../lib/store";
 import { saveDoc } from "../../lib/ipc";
 import CharacterEditor from "./CharacterEditor";
 import WordCounter from "./WordCounter";
-import StickyNotes from "./StickyNotes";
+import MarkdownPreview from "./MarkdownPreview";
 
+/**
+ * Editor
+ *
+ * This component provides a text editor for Markdown documents along with
+ * formatting controls, live word/character counts and inline comments.
+ * Inline comments are delimited by `// comment //` and are removed
+ * from the word/character counts.  They are rendered in the preview
+ * with a distinct style via the MarkdownPreview component.
+ *
+ * Formatting buttons wrap the currently selected text in Markdown
+ * markup (or inline HTML for features not supported directly by
+ * Markdown such as underline, custom fonts, sizes and colours).  If
+ * no text is selected, clicking a formatting button does nothing.
+ */
 export default function Editor() {
   const s = useSnapshot(state);
   const timerRef = useRef<number | undefined>(undefined);
@@ -24,7 +38,7 @@ export default function Editor() {
     };
   }, []);
 
-  // Character count toggle via Ctrl/⌘+Shift+C
+  // Keyboard shortcut to toggle character count (Ctrl/⌘+Shift+C)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") {
@@ -35,10 +49,11 @@ export default function Editor() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Word/char count ignoring inline comments
+  // Compute word and character counts, stripping out inline comments
   const { wordCount, charCount } = React.useMemo(() => {
     const text = s.editor.md || "";
-    const stripped = text.replace(/\/\/[\s\S]*?\/\/\s*/g, "");
+    // Remove //comment// segments from counts
+    const stripped = text.replace(/\/\/[^\n]*?\/\//gs, "");
     const words = stripped.trim().split(/\s+/).filter(Boolean);
     const wc = stripped.trim() ? words.length : 0;
     const cc = stripped.length;
@@ -49,7 +64,15 @@ export default function Editor() {
   const editingCharacter = !!s.currentCharId;
   if (noProject) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
+      <div
+        style={{
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--color-muted)",
+        }}
+      >
         <p style={{ fontSize: "1.2rem" }}>Open a New Project!</p>
       </div>
     );
@@ -58,30 +81,54 @@ export default function Editor() {
     return <CharacterEditor />;
   }
 
-  // Toolbar action handlers
-  const toggleBold = () => (state.editor.bold = !state.editor.bold);
-  const toggleItalic = () => (state.editor.italic = !state.editor.italic);
-  const toggleUnderline = () => (state.editor.underline = !state.editor.underline);
-  const toggleStrikeThrough = () => (state.editor.strikeThrough = !state.editor.strikeThrough);
-  const handleHighlightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    state.editor.highlightColor = e.target.value;
-  };
-  const handleFontColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    state.editor.fontColor = e.target.value;
-  };
-  const handleFontChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    state.editor.font = e.target.value;
-  };
-  const handleFontSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    state.editor.fontSize = parseInt(e.target.value) || 14;
-  };
-  const handleLineSpacingChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    state.editor.lineHeight = parseFloat(e.target.value);
-  };
-  const handleAlignChange = (align: string) => {
-    state.editor.align = align;
+  /**
+   * Helper to wrap the currently selected text in a prefix/suffix.
+   * If there is no selection, the function returns early.
+   */
+  const wrapSelection = (prefix: string, suffix: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    if (start === end) return;
+    const before = s.editor.md.slice(0, start);
+    const selected = s.editor.md.slice(start, end);
+    const after = s.editor.md.slice(end);
+    // Update the markdown in state
+    state.editor.md = before + prefix + selected + suffix + after;
+    // Restore selection around the newly wrapped text
+    const newStart = start + prefix.length;
+    const newEnd = newStart + selected.length;
+    // Delay to let React update the value
+    setTimeout(() => {
+      textarea.setSelectionRange(newStart, newEnd);
+      textarea.focus();
+    }, 0);
   };
 
+  // Formatting handlers operate on the current selection
+  const applyBold = () => wrapSelection("**", "**");
+  const applyItalic = () => wrapSelection("*", "*");
+  const applyUnderline = () => wrapSelection("<u>", "</u>");
+  const applyStrikeThrough = () => wrapSelection("~~", "~~");
+  const applyHighlight = () => {
+    const color = s.editor.highlightColor || "#ffff66";
+    wrapSelection(`<span style="background-color: ${color}">`, "</span>");
+  };
+  const applyFontColor = () => {
+    const color = s.editor.fontColor || "#000000";
+    wrapSelection(`<span style="color: ${color}">`, "</span>");
+  };
+  const applyFont = () => {
+    const font = s.editor.font || "Arial";
+    wrapSelection(`<span style="font-family: ${font}">`, "</span>");
+  };
+  const applyFontSize = () => {
+    const size = s.editor.fontSize || 14;
+    wrapSelection(`<span style="font-size: ${size}px">`, "</span>");
+  };
+
+  // Persist document on blur
   const onBlur = async () => {
     if (!state.currentDocId) return;
     await saveDoc(state.projectPath, state.currentDocId, state.editor.md);
@@ -89,64 +136,116 @@ export default function Editor() {
   };
 
   return (
-    <div style={{ position: "relative", height: "100%", width: "100%", maxWidth: "90%", margin: "0 auto", display: "flex", flexDirection: "column" }}>
+    <div
+      style={{
+        position: "relative",
+        height: "100%",
+        width: "100%",
+        maxWidth: "90%",
+        margin: "0 auto",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       {/* Ribbon-like toolbar */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 8 }}>
         {/* Font group */}
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <label>Font:</label>
-          <select value={s.editor.font} onChange={handleFontChange}>
+          <select value={s.editor.font} onChange={(e) => (state.editor.font = e.target.value)}>
             {["Arial", "Georgia", "Courier New", "Times New Roman", "Verdana"].map((f) => (
-              <option key={f} value={f}>{f}</option>
+              <option key={f} value={f}>
+                {f}
+              </option>
             ))}
           </select>
+          <button onClick={applyFont} style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid var(--color-border)" }}>
+            Apply
+          </button>
           <label>Size:</label>
           <input
             type="number"
             min="8"
             max="72"
             value={s.editor.fontSize}
-            onChange={handleFontSizeChange}
+            onChange={(e) => (state.editor.fontSize = parseInt(e.target.value) || 14)}
             style={{ width: 60 }}
           />
+          <button onClick={applyFontSize} style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid var(--color-border)" }}>
+            Apply
+          </button>
         </div>
         {/* Text style group */}
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <button onClick={toggleBold} style={{
-            fontWeight: "bold",
-            background: s.editor.bold ? "#e5e7eb" : "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            padding: "4px 8px",
-            borderRadius: 4,
-          }}>B</button>
-          <button onClick={toggleItalic} style={{
-            fontStyle: "italic",
-            background: s.editor.italic ? "#e5e7eb" : "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            padding: "4px 8px",
-            borderRadius: 4,
-          }}>I</button>
-          <button onClick={toggleUnderline} style={{
-            textDecoration: "underline",
-            background: s.editor.underline ? "#e5e7eb" : "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            padding: "4px 8px",
-            borderRadius: 4,
-          }}>U</button>
-          <button onClick={toggleStrikeThrough} style={{
-            textDecoration: "line-through",
-            background: s.editor.strikeThrough ? "#e5e7eb" : "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            padding: "4px 8px",
-            borderRadius: 4,
-          }}>S</button>
+          <button
+            onClick={applyBold}
+            style={{
+              fontWeight: "bold",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              padding: "4px 8px",
+              borderRadius: 4,
+            }}
+            title="Bold (Ctrl+B)"
+          >
+            B
+          </button>
+          <button
+            onClick={applyItalic}
+            style={{
+              fontStyle: "italic",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              padding: "4px 8px",
+              borderRadius: 4,
+            }}
+            title="Italic (Ctrl+I)"
+          >
+            I
+          </button>
+          <button
+            onClick={applyUnderline}
+            style={{
+              textDecoration: "underline",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              padding: "4px 8px",
+              borderRadius: 4,
+            }}
+            title="Underline"
+          >
+            U
+          </button>
+          <button
+            onClick={applyStrikeThrough}
+            style={{
+              textDecoration: "line-through",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              padding: "4px 8px",
+              borderRadius: 4,
+            }}
+            title="Strikethrough"
+          >
+            S
+          </button>
           <label style={{ display: "flex", alignItems: "center", gap: 2 }}>
             Highlight:
-            <input type="color" value={s.editor.highlightColor || "#ffffff"} onChange={handleHighlightChange} />
+            <input
+              type="color"
+              value={s.editor.highlightColor || "#ffff66"}
+              onChange={(e) => (state.editor.highlightColor = e.target.value)}
+              onBlur={applyHighlight}
+            />
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 2 }}>
             Color:
-            <input type="color" value={s.editor.fontColor || "#000000"} onChange={handleFontColorChange} />
+            <input
+              type="color"
+              value={s.editor.fontColor || "#000000"}
+              onChange={(e) => (state.editor.fontColor = e.target.value)}
+              onBlur={applyFontColor}
+            />
           </label>
         </div>
         {/* Paragraph group */}
@@ -155,7 +254,7 @@ export default function Editor() {
           {["left", "center", "right"].map((algn) => (
             <button
               key={algn}
-              onClick={() => handleAlignChange(algn)}
+              onClick={() => (state.editor.align = algn)}
               style={{
                 padding: "4px 8px",
                 borderRadius: 4,
@@ -167,15 +266,20 @@ export default function Editor() {
             </button>
           ))}
           <label>Line spacing:</label>
-          <select value={String(s.editor.lineHeight)} onChange={handleLineSpacingChange}>
+          <select
+            value={String(s.editor.lineHeight)}
+            onChange={(e) => (state.editor.lineHeight = parseFloat(e.target.value))}
+          >
             {["1", "1.2", "1.4", "1.6", "2"].map((l) => (
-              <option key={l} value={l}>{l}</option>
+              <option key={l} value={l}>
+                {l}
+              </option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* Single editable area (no preview) */}
+      {/* Editable area */}
       <textarea
         ref={textareaRef}
         value={s.editor.md}
@@ -190,26 +294,30 @@ export default function Editor() {
           fontFamily: s.editor.font,
           fontSize: `${s.editor.fontSize}px`,
           lineHeight: s.editor.lineHeight,
-          fontWeight: s.editor.bold ? "bold" : "normal",
-          fontStyle: s.editor.italic ? "italic" : "normal",
-          textDecoration: `${s.editor.underline ? "underline" : ""} ${s.editor.strikeThrough ? "line-through" : ""}`.trim(),
-          background: s.editor.highlightColor || "var(--color-surface)",
-          color: s.editor.fontColor || "inherit",
           textAlign: s.editor.align as any,
           resize: "none",
           overflowY: "auto",
+          // Colours applied on selection via markup, not globally
+          background: "var(--color-surface)",
+          color: "var(--color-text)",
         }}
         aria-label="Document editor"
       />
 
+      {/* Live preview */}
+      <MarkdownPreview md={s.editor.md} />
+
       {/* Counters */}
-      <WordCounter count={wordCount} label="Words" anchor="left" />
+      <WordCounter
+        count={wordCount}
+        label="Words"
+        anchor="left"
+        onClick={() => (state.editor.showCharCount = !s.editor.showCharCount)}
+      />
       {s.editor.showCharCount && (
         <WordCounter count={charCount} label="Characters" anchor="right" />
       )}
 
-      {/* Sticky notes */}
-      <StickyNotes />
     </div>
   );
 }
