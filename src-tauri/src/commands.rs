@@ -625,16 +625,19 @@ pub fn import_character_image(
     if !src.exists() || !src.is_file() {
         return Err("source file does not exist".into());
     }
-    // destination: PROJECT/assets/characters/<char_id>/<filename>
+    // Copy into assets/characters/<char_id>/
     let dest_dir = Path::new(&project_path)
         .join("assets")
         .join("characters")
         .join(&char_id);
     fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
-    let filename = src
-        .file_name()
-        .ok_or("invalid filename")?;
+    let filename = src.file_name().ok_or("invalid filename")?;
     let dest_path = dest_dir.join(filename);
     fs::copy(&src, &dest_path).map_err(|e| e.to_string())?;
-    Ok(dest_path.to_string_lossy().to_string())
+
+    // Return a project‑relative path (forward slashes)
+    match dest_path.strip_prefix(&project_path) {
+        Ok(rel) => Ok(rel.to_string_lossy().replace("\\", "/")),
+        Err(_) => Ok(dest_path.to_string_lossy().replace("\\", "/")),
+    }
 }

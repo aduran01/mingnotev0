@@ -14,15 +14,24 @@ export const state = proxy({
   folders: [] as Folder[],
   characters: [] as Character[],
 
-  // Added showCharCount to control visibility of the character counter.
+  // Editor state: added formatting fields
   editor: {
     md: "",
     lastSaved: 0,
     font: "Arial",
+    fontSize: 14,
     lineHeight: 1.6,
+    bold: false,
+    italic: false,
+    underline: false,
+    strikeThrough: false,
+    highlightColor: "", // note background color
+    fontColor: "",      // note text color
+    align: "left",      // "left" | "center" | "right"
     showCharCount: false,
   },
 
+  // Character editor unchanged
   charEditor: {
     age: "",
     nationality: "",
