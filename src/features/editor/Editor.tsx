@@ -1,31 +1,16 @@
 import * as React from "react";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect } from "react";
 import { useSnapshot } from "valtio";
 import { state } from "../../lib/store";
 import { saveDoc } from "../../lib/ipc";
 import CharacterEditor from "./CharacterEditor";
 import WordCounter from "./WordCounter";
+import StickyNotes from "./StickyNotes";
 
-/**
- * Editor
- *
- * This component provides a text editor for Markdown documents along with
- * formatting controls, live word/character counts and inline comments.
- * Inline comments are delimited by `// comment //` and are removed
- * from the word/character counts.  They are rendered in the preview
- * with a distinct style via the MarkdownPreview component.
- *
- * Formatting buttons wrap the currently selected text in Markdown
- * markup (or inline HTML for features not supported directly by
- * Markdown such as underline, custom fonts, sizes and colours).  If
- * no text is selected, clicking a formatting button does nothing.
- */
 export default function Editor() {
   const s = useSnapshot(state);
-  const editorRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
-  const [wordCount, setWordCount] = useState(0);
-  const [charCount, setCharCount] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Autosave every 5 seconds
   useEffect(() => {
@@ -39,7 +24,7 @@ export default function Editor() {
     };
   }, []);
 
-  // Keyboard shortcut to toggle character count (Ctrl/⌘+Shift+C)
+  // Character count toggle via Ctrl/⌘+Shift+C
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") {
@@ -50,47 +35,21 @@ export default function Editor() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Ensure execCommand uses CSS styles instead of deprecated <font> tags
-  useEffect(() => {
-    try {
-      document.execCommand("styleWithCSS", false, "true");
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  // Compute word and character counts based on the current HTML.  Inline comment
-  // spans are removed from a clone of the DOM before counting so that their
-  // text does not contribute to the counts.
-  useEffect(() => {
-    const el = editorRef.current;
-    if (!el) {
-      setWordCount(0);
-      setCharCount(0);
-      return;
-    }
-    const clone = el.cloneNode(true) as HTMLElement;
-    // Remove inline comments from the clone
-    clone.querySelectorAll(".inline-comment").forEach((c) => c.remove());
-    const text = clone.innerText || "";
-    const words = text.trim().split(/\s+/).filter(Boolean);
-    setWordCount(text.trim() ? words.length : 0);
-    setCharCount(text.length);
+  // Word/char count ignoring inline comments
+  const { wordCount, charCount } = React.useMemo(() => {
+    const text = s.editor.md || "";
+    const stripped = text.replace(/\/\/[\s\S]*?\/\/\s*/g, "");
+    const words = stripped.trim().split(/\s+/).filter(Boolean);
+    const wc = stripped.trim() ? words.length : 0;
+    const cc = stripped.length;
+    return { wordCount: wc, charCount: cc };
   }, [s.editor.md]);
 
   const noProject = !s.projectPath;
   const editingCharacter = !!s.currentCharId;
   if (noProject) {
     return (
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--color-muted)",
-        }}
-      >
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
         <p style={{ fontSize: "1.2rem" }}>Open a New Project!</p>
       </div>
     );
@@ -99,87 +58,30 @@ export default function Editor() {
     return <CharacterEditor />;
   }
 
-  /**
-   * Helper to wrap the current selection in a span with given CSS
-   * properties.  If there is no selection, nothing happens.
-   */
-  const wrapSelectionWithSpan = (styles: Partial<CSSStyleDeclaration>) => {
-    const el = editorRef.current;
-    if (!el) return;
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
-    const range = selection.getRangeAt(0);
-    if (range.collapsed) return;
-    const span = document.createElement("span");
-    Object.assign(span.style, styles);
-    span.appendChild(range.extractContents());
-    range.insertNode(span);
-    // Move cursor to end of the inserted span
-    selection.collapse(span, span.childNodes.length);
-    // Update state with new HTML
-    state.editor.md = el.innerHTML;
+  // Toolbar action handlers
+  const toggleBold = () => (state.editor.bold = !state.editor.bold);
+  const toggleItalic = () => (state.editor.italic = !state.editor.italic);
+  const toggleUnderline = () => (state.editor.underline = !state.editor.underline);
+  const toggleStrikeThrough = () => (state.editor.strikeThrough = !state.editor.strikeThrough);
+  const handleHighlightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    state.editor.highlightColor = e.target.value;
+  };
+  const handleFontColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    state.editor.fontColor = e.target.value;
+  };
+  const handleFontChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    state.editor.font = e.target.value;
+  };
+  const handleFontSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    state.editor.fontSize = parseInt(e.target.value) || 14;
+  };
+  const handleLineSpacingChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    state.editor.lineHeight = parseFloat(e.target.value);
+  };
+  const handleAlignChange = (align: string) => {
+    state.editor.align = align;
   };
 
-  /**
-   * Insert an inline comment by wrapping the selected text in a span
-   * with the special `inline-comment` class.  If no text is selected
-   * the function does nothing.
-   */
-  const applyInlineComment = () => {
-    const el = editorRef.current;
-    if (!el) return;
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
-    const range = selection.getRangeAt(0);
-    if (range.collapsed) return;
-    const span = document.createElement("span");
-    span.className = "inline-comment";
-    // Bold inside comments via CSS; no need to set weight here
-    span.appendChild(range.extractContents());
-    range.insertNode(span);
-    selection.collapse(span, span.childNodes.length);
-    state.editor.md = el.innerHTML;
-  };
-
-  // Formatting handlers using execCommand for basic styles
-  const applyBold = () => {
-    editorRef.current?.focus();
-    document.execCommand("bold");
-    state.editor.md = editorRef.current?.innerHTML || "";
-  };
-  const applyItalic = () => {
-    editorRef.current?.focus();
-    document.execCommand("italic");
-    state.editor.md = editorRef.current?.innerHTML || "";
-  };
-  const applyUnderline = () => {
-    editorRef.current?.focus();
-    document.execCommand("underline");
-    state.editor.md = editorRef.current?.innerHTML || "";
-  };
-  const applyStrikeThrough = () => {
-    editorRef.current?.focus();
-    document.execCommand("strikeThrough");
-    state.editor.md = editorRef.current?.innerHTML || "";
-  };
-  const applyHighlight = () => {
-    const color = s.editor.highlightColor || "#ffff66";
-    wrapSelectionWithSpan({ backgroundColor: color });
-  };
-  const applyFontColor = () => {
-    const color = s.editor.fontColor || "#000000";
-    wrapSelectionWithSpan({ color });
-  };
-  const applyFont = () => {
-    const font = s.editor.font || "Arial";
-    wrapSelectionWithSpan({ fontFamily: font });
-  };
-  const applyFontSize = () => {
-    const size = s.editor.fontSize || 14;
-    wrapSelectionWithSpan({ fontSize: `${size}px` });
-  };
-
-  // Persist document on blur
   const onBlur = async () => {
     if (!state.currentDocId) return;
     await saveDoc(state.projectPath, state.currentDocId, state.editor.md);
@@ -187,128 +89,64 @@ export default function Editor() {
   };
 
   return (
-    <div
-      style={{
-        position: "relative",
-        height: "100%",
-        width: "100%",
-        maxWidth: "90%",
-        margin: "0 auto",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <div style={{ position: "relative", height: "100%", width: "100%", maxWidth: "90%", margin: "0 auto", display: "flex", flexDirection: "column" }}>
       {/* Ribbon-like toolbar */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 8 }}>
         {/* Font group */}
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <label>Font:</label>
-          <select value={s.editor.font} onChange={(e) => (state.editor.font = e.target.value)}>
+          <select value={s.editor.font} onChange={handleFontChange}>
             {["Arial", "Georgia", "Courier New", "Times New Roman", "Verdana"].map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
+              <option key={f} value={f}>{f}</option>
             ))}
           </select>
-          <button onClick={applyFont} style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid var(--color-border)" }}>
-            Apply
-          </button>
           <label>Size:</label>
           <input
             type="number"
             min="8"
             max="72"
             value={s.editor.fontSize}
-            onChange={(e) => (state.editor.fontSize = parseInt(e.target.value) || 14)}
+            onChange={handleFontSizeChange}
             style={{ width: 60 }}
           />
-          <button onClick={applyFontSize} style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid var(--color-border)" }}>
-            Apply
-          </button>
         </div>
         {/* Text style group */}
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <button
-            onClick={applyBold}
-            style={{
-              fontWeight: "bold",
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              padding: "4px 8px",
-              borderRadius: 4,
-            }}
-            title="Bold"
-          >
-            B
-          </button>
-          <button
-            onClick={applyItalic}
-            style={{
-              fontStyle: "italic",
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              padding: "4px 8px",
-              borderRadius: 4,
-            }}
-            title="Italic"
-          >
-            I
-          </button>
-          <button
-            onClick={applyUnderline}
-            style={{
-              textDecoration: "underline",
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              padding: "4px 8px",
-              borderRadius: 4,
-            }}
-            title="Underline"
-          >
-            U
-          </button>
-          <button
-            onClick={applyStrikeThrough}
-            style={{
-              textDecoration: "line-through",
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              padding: "4px 8px",
-              borderRadius: 4,
-            }}
-            title="Strikethrough"
-          >
-            S
-          </button>
-          <button
-            onClick={applyInlineComment}
-            style={{
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              padding: "4px 8px",
-              borderRadius: 4,
-            }}
-            title="Inline comment"
-          >
-            //
-          </button>
+          <button onClick={toggleBold} style={{
+            fontWeight: "bold",
+            background: s.editor.bold ? "#e5e7eb" : "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            padding: "4px 8px",
+            borderRadius: 4,
+          }}>B</button>
+          <button onClick={toggleItalic} style={{
+            fontStyle: "italic",
+            background: s.editor.italic ? "#e5e7eb" : "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            padding: "4px 8px",
+            borderRadius: 4,
+          }}>I</button>
+          <button onClick={toggleUnderline} style={{
+            textDecoration: "underline",
+            background: s.editor.underline ? "#e5e7eb" : "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            padding: "4px 8px",
+            borderRadius: 4,
+          }}>U</button>
+          <button onClick={toggleStrikeThrough} style={{
+            textDecoration: "line-through",
+            background: s.editor.strikeThrough ? "#e5e7eb" : "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            padding: "4px 8px",
+            borderRadius: 4,
+          }}>S</button>
           <label style={{ display: "flex", alignItems: "center", gap: 2 }}>
             Highlight:
-            <input
-              type="color"
-              value={s.editor.highlightColor || "#ffff66"}
-              onChange={(e) => (state.editor.highlightColor = e.target.value)}
-              onBlur={applyHighlight}
-            />
+            <input type="color" value={s.editor.highlightColor || "#ffffff"} onChange={handleHighlightChange} />
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 2 }}>
             Color:
-            <input
-              type="color"
-              value={s.editor.fontColor || "#000000"}
-              onChange={(e) => (state.editor.fontColor = e.target.value)}
-              onBlur={applyFontColor}
-            />
+            <input type="color" value={s.editor.fontColor || "#000000"} onChange={handleFontColorChange} />
           </label>
         </div>
         {/* Paragraph group */}
@@ -317,7 +155,7 @@ export default function Editor() {
           {["left", "center", "right"].map((algn) => (
             <button
               key={algn}
-              onClick={() => (state.editor.align = algn)}
+              onClick={() => handleAlignChange(algn)}
               style={{
                 padding: "4px 8px",
                 borderRadius: 4,
@@ -329,59 +167,49 @@ export default function Editor() {
             </button>
           ))}
           <label>Line spacing:</label>
-          <select
-            value={String(s.editor.lineHeight)}
-            onChange={(e) => (state.editor.lineHeight = parseFloat(e.target.value))}
-          >
+          <select value={String(s.editor.lineHeight)} onChange={handleLineSpacingChange}>
             {["1", "1.2", "1.4", "1.6", "2"].map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
+              <option key={l} value={l}>{l}</option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* Editable area */}
-      <div
-        ref={editorRef}
-        contentEditable
-        suppressContentEditableWarning
-        onInput={(e) => {
-          const html = (e.target as HTMLElement).innerHTML;
-          state.editor.md = html;
-        }}
+      {/* Single editable area (no preview) */}
+      <textarea
+        ref={textareaRef}
+        value={s.editor.md}
+        onChange={(e) => (state.editor.md = e.target.value)}
         onBlur={onBlur}
         style={{
           flex: 1,
-          minHeight: 0,
+          height: "100%",
           padding: 12,
           border: "1px solid var(--color-border)",
           borderRadius: 8,
           fontFamily: s.editor.font,
           fontSize: `${s.editor.fontSize}px`,
           lineHeight: s.editor.lineHeight,
+          fontWeight: s.editor.bold ? "bold" : "normal",
+          fontStyle: s.editor.italic ? "italic" : "normal",
+          textDecoration: `${s.editor.underline ? "underline" : ""} ${s.editor.strikeThrough ? "line-through" : ""}`.trim(),
+          background: s.editor.highlightColor || "var(--color-surface)",
+          color: s.editor.fontColor || "inherit",
           textAlign: s.editor.align as any,
+          resize: "none",
           overflowY: "auto",
-          background: "var(--color-surface)",
-          color: "var(--color-text)",
-          whiteSpace: "pre-wrap",
-          wordWrap: "break-word",
         }}
-        // Set initial HTML; React will ignore updates after mount because we
-        // manage innerHTML manually via onInput and state.editor.md
-        dangerouslySetInnerHTML={{ __html: s.editor.md || "" }}
         aria-label="Document editor"
       />
 
       {/* Counters */}
-      <WordCounter
-        count={wordCount}
-        label="Words"
-        anchor="left"
-        onClick={() => (state.editor.showCharCount = !s.editor.showCharCount)}
-      />
-      {s.editor.showCharCount && <WordCounter count={charCount} label="Characters" anchor="right" />}
+      <WordCounter count={wordCount} label="Words" anchor="left" />
+      {s.editor.showCharCount && (
+        <WordCounter count={charCount} label="Characters" anchor="right" />
+      )}
+
+      {/* Sticky notes */}
+      <StickyNotes />
     </div>
   );
 }
