@@ -1,11 +1,10 @@
 import * as React from "react";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useSnapshot } from "valtio";
 import { state } from "../../lib/store";
 import { saveDoc } from "../../lib/ipc";
 import CharacterEditor from "./CharacterEditor";
 import WordCounter from "./WordCounter";
-import MarkdownPreview from "./MarkdownPreview";
 
 /**
  * Editor
@@ -23,8 +22,10 @@ import MarkdownPreview from "./MarkdownPreview";
  */
 export default function Editor() {
   const s = useSnapshot(state);
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [wordCount, setWordCount] = useState(0);
+  const [charCount, setCharCount] = useState(0);
 
   // Autosave every 5 seconds
   useEffect(() => {
@@ -49,15 +50,32 @@ export default function Editor() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Compute word and character counts, stripping out inline comments
-  const { wordCount, charCount } = React.useMemo(() => {
-    const text = s.editor.md || "";
-    // Remove //comment// segments from counts
-    const stripped = text.replace(/\/\/[^\n]*?\/\//gs, "");
-    const words = stripped.trim().split(/\s+/).filter(Boolean);
-    const wc = stripped.trim() ? words.length : 0;
-    const cc = stripped.length;
-    return { wordCount: wc, charCount: cc };
+  // Ensure execCommand uses CSS styles instead of deprecated <font> tags
+  useEffect(() => {
+    try {
+      document.execCommand("styleWithCSS", false, "true");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Compute word and character counts based on the current HTML.  Inline comment
+  // spans are removed from a clone of the DOM before counting so that their
+  // text does not contribute to the counts.
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) {
+      setWordCount(0);
+      setCharCount(0);
+      return;
+    }
+    const clone = el.cloneNode(true) as HTMLElement;
+    // Remove inline comments from the clone
+    clone.querySelectorAll(".inline-comment").forEach((c) => c.remove());
+    const text = clone.innerText || "";
+    const words = text.trim().split(/\s+/).filter(Boolean);
+    setWordCount(text.trim() ? words.length : 0);
+    setCharCount(text.length);
   }, [s.editor.md]);
 
   const noProject = !s.projectPath;
@@ -82,50 +100,83 @@ export default function Editor() {
   }
 
   /**
-   * Helper to wrap the currently selected text in a prefix/suffix.
-   * If there is no selection, the function returns early.
+   * Helper to wrap the current selection in a span with given CSS
+   * properties.  If there is no selection, nothing happens.
    */
-  const wrapSelection = (prefix: string, suffix: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const start = textarea.selectionStart ?? 0;
-    const end = textarea.selectionEnd ?? 0;
-    if (start === end) return;
-    const before = s.editor.md.slice(0, start);
-    const selected = s.editor.md.slice(start, end);
-    const after = s.editor.md.slice(end);
-    // Update the markdown in state
-    state.editor.md = before + prefix + selected + suffix + after;
-    // Restore selection around the newly wrapped text
-    const newStart = start + prefix.length;
-    const newEnd = newStart + selected.length;
-    // Delay to let React update the value
-    setTimeout(() => {
-      textarea.setSelectionRange(newStart, newEnd);
-      textarea.focus();
-    }, 0);
+  const wrapSelectionWithSpan = (styles: Partial<CSSStyleDeclaration>) => {
+    const el = editorRef.current;
+    if (!el) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (range.collapsed) return;
+    const span = document.createElement("span");
+    Object.assign(span.style, styles);
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    // Move cursor to end of the inserted span
+    selection.collapse(span, span.childNodes.length);
+    // Update state with new HTML
+    state.editor.md = el.innerHTML;
   };
 
-  // Formatting handlers operate on the current selection
-  const applyBold = () => wrapSelection("**", "**");
-  const applyItalic = () => wrapSelection("*", "*");
-  const applyUnderline = () => wrapSelection("<u>", "</u>");
-  const applyStrikeThrough = () => wrapSelection("~~", "~~");
+  /**
+   * Insert an inline comment by wrapping the selected text in a span
+   * with the special `inline-comment` class.  If no text is selected
+   * the function does nothing.
+   */
+  const applyInlineComment = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (range.collapsed) return;
+    const span = document.createElement("span");
+    span.className = "inline-comment";
+    // Bold inside comments via CSS; no need to set weight here
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    selection.collapse(span, span.childNodes.length);
+    state.editor.md = el.innerHTML;
+  };
+
+  // Formatting handlers using execCommand for basic styles
+  const applyBold = () => {
+    editorRef.current?.focus();
+    document.execCommand("bold");
+    state.editor.md = editorRef.current?.innerHTML || "";
+  };
+  const applyItalic = () => {
+    editorRef.current?.focus();
+    document.execCommand("italic");
+    state.editor.md = editorRef.current?.innerHTML || "";
+  };
+  const applyUnderline = () => {
+    editorRef.current?.focus();
+    document.execCommand("underline");
+    state.editor.md = editorRef.current?.innerHTML || "";
+  };
+  const applyStrikeThrough = () => {
+    editorRef.current?.focus();
+    document.execCommand("strikeThrough");
+    state.editor.md = editorRef.current?.innerHTML || "";
+  };
   const applyHighlight = () => {
     const color = s.editor.highlightColor || "#ffff66";
-    wrapSelection(`<span style="background-color: ${color}">`, "</span>");
+    wrapSelectionWithSpan({ backgroundColor: color });
   };
   const applyFontColor = () => {
     const color = s.editor.fontColor || "#000000";
-    wrapSelection(`<span style="color: ${color}">`, "</span>");
+    wrapSelectionWithSpan({ color });
   };
   const applyFont = () => {
     const font = s.editor.font || "Arial";
-    wrapSelection(`<span style="font-family: ${font}">`, "</span>");
+    wrapSelectionWithSpan({ fontFamily: font });
   };
   const applyFontSize = () => {
     const size = s.editor.fontSize || 14;
-    wrapSelection(`<span style="font-size: ${size}px">`, "</span>");
+    wrapSelectionWithSpan({ fontSize: `${size}px` });
   };
 
   // Persist document on blur
@@ -186,7 +237,7 @@ export default function Editor() {
               padding: "4px 8px",
               borderRadius: 4,
             }}
-            title="Bold (Ctrl+B)"
+            title="Bold"
           >
             B
           </button>
@@ -199,7 +250,7 @@ export default function Editor() {
               padding: "4px 8px",
               borderRadius: 4,
             }}
-            title="Italic (Ctrl+I)"
+            title="Italic"
           >
             I
           </button>
@@ -228,6 +279,18 @@ export default function Editor() {
             title="Strikethrough"
           >
             S
+          </button>
+          <button
+            onClick={applyInlineComment}
+            style={{
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              padding: "4px 8px",
+              borderRadius: 4,
+            }}
+            title="Inline comment"
+          >
+            //
           </button>
           <label style={{ display: "flex", alignItems: "center", gap: 2 }}>
             Highlight:
@@ -280,14 +343,18 @@ export default function Editor() {
       </div>
 
       {/* Editable area */}
-      <textarea
-        ref={textareaRef}
-        value={s.editor.md}
-        onChange={(e) => (state.editor.md = e.target.value)}
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={(e) => {
+          const html = (e.target as HTMLElement).innerHTML;
+          state.editor.md = html;
+        }}
         onBlur={onBlur}
         style={{
           flex: 1,
-          height: "100%",
+          minHeight: 0,
           padding: 12,
           border: "1px solid var(--color-border)",
           borderRadius: 8,
@@ -295,17 +362,17 @@ export default function Editor() {
           fontSize: `${s.editor.fontSize}px`,
           lineHeight: s.editor.lineHeight,
           textAlign: s.editor.align as any,
-          resize: "none",
           overflowY: "auto",
-          // Colours applied on selection via markup, not globally
           background: "var(--color-surface)",
           color: "var(--color-text)",
+          whiteSpace: "pre-wrap",
+          wordWrap: "break-word",
         }}
+        // Set initial HTML; React will ignore updates after mount because we
+        // manage innerHTML manually via onInput and state.editor.md
+        dangerouslySetInnerHTML={{ __html: s.editor.md || "" }}
         aria-label="Document editor"
       />
-
-      {/* Live preview */}
-      <MarkdownPreview md={s.editor.md} />
 
       {/* Counters */}
       <WordCounter
@@ -314,10 +381,7 @@ export default function Editor() {
         anchor="left"
         onClick={() => (state.editor.showCharCount = !s.editor.showCharCount)}
       />
-      {s.editor.showCharCount && (
-        <WordCounter count={charCount} label="Characters" anchor="right" />
-      )}
-
+      {s.editor.showCharCount && <WordCounter count={charCount} label="Characters" anchor="right" />}
     </div>
   );
 }
