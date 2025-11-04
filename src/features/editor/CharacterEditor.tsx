@@ -15,19 +15,11 @@ function isPdf(path: string): boolean {
   return /\.pdf(\?.*)?$/i.test(path);
 }
 function looksAbsolutePath(p: string): boolean {
-  return /^[a-zA-Z]:[\\\/]/.test(p) || /^\\\\/.test(p) || p.startsWith("/");
+  return /^[a-zA-Z]:[\\\/]?/.test(p) || /^\\\\/.test(p) || p.startsWith("/");
 }
 function normSlashes(p: string): string {
   return p.replace(/\\/g, "/");
 }
-
-/* ------------------------------ types ------------------------------ */
-
-/*type Character = {
-  id: string;
-  name: string;
-  imagePath?: string;  
-}; */
 
 /* ------------------------------ component ------------------------------ */
 
@@ -38,6 +30,8 @@ export default function CharacterEditor() {
 
   const [imageUrl, setImageUrl] = useState<string>(""); // the actual <img>/<object> src
   const [imgErr, setImgErr] = useState<string>("");
+  // Store the immediate preview as a fallback in case the saved path fails
+  const fallbackUrl = useRef<string>("");
 
   /** Build a WebView-safe URL (with cache-buster) for any path/URL. */
   const buildDisplayUrl = useCallback(
@@ -87,6 +81,7 @@ export default function CharacterEditor() {
       const url = await buildDisplayUrl(state.charEditor.image);
       setImageUrl(url);
       setImgErr("");
+      fallbackUrl.current = url;
     })();
   }, [s.projectPath, s.currentCharId, buildDisplayUrl]);
 
@@ -143,60 +138,49 @@ export default function CharacterEditor() {
     state.charEditor.lastSaved = Date.now();
   };
 
-/* --- pick image: instant preview from picked path, then switch to saved relative path --- */
-const onPickImage = async () => {
-  const picked = await open({
-    multiple: false,
-    directory: false,
-    filters: [
-      { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
-      { name: "PDF", extensions: ["pdf"] },
-    ],
-  });
-  if (!picked || typeof picked !== "string") return;
+  /* --- pick image: instant preview from picked path, then switch to saved relative path --- */
+  const onPickImage = async () => {
+    const picked = await open({
+      multiple: false,
+      directory: false,
+      filters: [
+        { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] },
+        { name: "PDF", extensions: ["pdf"] },
+      ],
+    });
+    if (!picked || typeof picked !== "string") return;
 
-  // 1) Instant preview from OS path (cache-busted)
-  cacheSeed.current = Date.now();
-  const immediate = convertFileSrc(picked) + `?v=${cacheSeed.current}`;
-  console.debug("[CharacterEditor] immediate preview url:", immediate);
-  setImageUrl(immediate);
-  setImgErr("");
-
-  try {
-    // 2) Import into project; backend SHOULD return a project-relative path like:
-    //    assets/characters/<id>/photo.png
-    let rel = await importCharacterImage(state.projectPath, state.currentCharId, picked);
-
-    // Normalize slashes just in case (Windows backslashes)
-    rel = rel.replace(/\\/g, "/");
-
-    // 3) Persist immediately so state & DB match
-    state.charEditor.image = rel;
-    await persistNow();
-
-    // 4) Swap preview to saved project-relative path
-    const savedUrl = await buildDisplayUrl(rel);
-
-    // --- Diagnostics you requested ---
-    console.debug("[CharacterEditor] final imageUrl:", savedUrl);
-    if (!savedUrl.startsWith("tauri://localhost/")) {
-      console.warn(
-        "[CharacterEditor] imageUrl is not a tauri://localhost URL; check CSP and returned path"
-      );
-      console.log("projectPath:", state.projectPath);
-      console.log("stored image (should be project-relative):", rel);
-    }
-
-    setImageUrl(savedUrl);
+    // 1) Instant preview from OS path (cache-busted)
+    cacheSeed.current = Date.now();
+    const immediate = convertFileSrc(picked) + `?v=${cacheSeed.current}`;
+    fallbackUrl.current = immediate;
+    setImageUrl(immediate);
     setImgErr("");
-  } catch (e) {
-    console.error("importCharacterImage failed:", e);
-    // keep the immediate preview; surface a gentle UI hint
-    setImgErr(
-      "Could not import the file into the project. Previewing original path."
-    );
-  }
-};
+
+    try {
+      // 2) Import into project; backend SHOULD return a project-relative path like:
+      //    assets/characters/<id>/photo.png
+      let rel = await importCharacterImage(state.projectPath, state.currentCharId, picked);
+
+      // Normalize slashes just in case (Windows backslashes)
+      rel = rel.replace(/\\/g, "/");
+
+      // 3) Persist immediately so state & DB match
+      state.charEditor.image = rel;
+      await persistNow();
+
+      // 4) Swap preview to saved project-relative path
+      const savedUrl = await buildDisplayUrl(rel);
+      setImageUrl(savedUrl);
+      setImgErr("");
+    } catch (e) {
+      console.error("importCharacterImage failed:", e);
+      // keep the immediate preview; surface a gentle UI hint
+      setImgErr(
+        "Could not import the file into the project. Previewing original path."
+      );
+    }
+  };
 
   /* ------------------------------ UI ------------------------------ */
 
@@ -245,9 +229,9 @@ const onPickImage = async () => {
               alt="Character"
               style={{ maxWidth: "100%", maxHeight: 300, objectFit: "contain", marginBottom: 8 }}
               onError={() => {
-                // if CSP/path fails, collapse gracefully
-                setImgErr("Failed to load image.");
-                setImageUrl("");
+                // if saved path fails, fallback to the immediate preview
+                setImgErr("Failed to load saved image; previewing original path.");
+                setImageUrl(fallbackUrl.current);
               }}
               onLoad={() => setImgErr("")}
             />

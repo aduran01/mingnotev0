@@ -1,43 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 
 interface WordCounterProps {
-  /**
-   * The numeric value to display.  For example, the word count or
-   * character count.
-   */
   count: number;
-  /** Label shown next to the count. */
   label: string;
-  /**
-   * Optional background colour.  Defaults to a soft pink in keeping
-   * with the MingNote palette.
-   */
   color?: string;
-  /**
-   * Which side of the viewport the counter should attach to.  Left
-   * counters position themselves relative to the left edge; right
-   * counters to the right edge.
-   */
   anchor?: "left" | "right";
-  /**
-   * Custom key used to persist the counter's position across
-   * sessions.  If omitted, a key is derived from the label.
-   */
   storageKey?: string;
-  /**
-   * Optional click handler.  When provided, clicking the counter
-   * invokes this callback rather than initiating a drag.  This is
-   * used by the Editor to toggle the visibility of the character
-   * count when the word count is clicked.
-   */
   onClick?: () => void;
 }
 
-/**
- * Draggable floating counter.  It uses localStorage to remember its
- * position across sessions.  The `anchor` prop controls whether it
- * attaches to the left or right side of the viewport.
- */
 const WordCounter: React.FC<WordCounterProps> = ({
   count,
   label,
@@ -46,8 +17,9 @@ const WordCounter: React.FC<WordCounterProps> = ({
   storageKey,
   onClick,
 }) => {
-  const key =
-    storageKey || `mingnote-${label.toLowerCase().replace(/\s+/g, "")}--pos`;
+  const key = storageKey || `mingnote-${label.toLowerCase().replace(/\s+/g, "")}--pos`;
+
+  // Store absolute left/bottom so dragging direction is always natural.
   const [pos, setPos] = useState<{ x: number; y: number }>(() => {
     try {
       const stored = localStorage.getItem(key);
@@ -57,30 +29,37 @@ const WordCounter: React.FC<WordCounterProps> = ({
           return parsed;
         }
       }
-    } catch {
-      /* ignore */
-    }
-    return { x: 20, y: 20 };
+    } catch {}
+    // Default position: 20px from bottom; 20px from left or right edge.
+    const defaultX = anchor === "right" ? Math.max(20, window.innerWidth - 140) : 20;
+    return { x: defaultX, y: 20 };
   });
 
-  // Persist position whenever it changes
+  // Persist position
   useEffect(() => {
     try {
       localStorage.setItem(key, JSON.stringify(pos));
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   }, [pos, key]);
+
+  // Keep within viewport on resize
+  useEffect(() => {
+    const onResize = () => {
+      setPos((p) => ({
+        x: Math.min(Math.max(0, p.x), Math.max(0, window.innerWidth - 120)),
+        y: Math.min(Math.max(0, p.y), Math.max(0, window.innerHeight - 40)),
+      }));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const isDragging = useRef(false);
   const start = useRef({ x: 0, y: 0 });
   const init = useRef({ x: 0, y: 0 });
 
   const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Prevent default to stop text selection on double-click
     e.preventDefault();
-    // If a click handler is provided, invoke it and return.  Do not
-    // start a drag interaction when clicking to toggle.
     if (onClick) {
       onClick();
       return;
@@ -108,7 +87,7 @@ const WordCounter: React.FC<WordCounterProps> = ({
   const style: React.CSSProperties = {
     position: "fixed",
     bottom: pos.y,
-    ...(anchor === "left" ? { left: pos.x } : { right: pos.x }),
+    left: pos.x,
     background: color,
     padding: "4px 8px",
     borderRadius: 4,
@@ -119,11 +98,7 @@ const WordCounter: React.FC<WordCounterProps> = ({
   };
 
   return (
-    <div
-      style={style}
-      onMouseDown={onMouseDown}
-      aria-label={`${label} counter`}
-    >
+    <div style={style} onMouseDown={onMouseDown} aria-label={`${label} counter`}>
       {label}: {count}
     </div>
   );
