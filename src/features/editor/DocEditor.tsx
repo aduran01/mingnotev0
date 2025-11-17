@@ -8,7 +8,7 @@ import StickyNotes from "./StickyNotes";
 
 /* ---------- Helpers ---------- */
 
-// Turn `// ... //` into boxed spans (display-only)
+// Turn `// ... //` into boxed spans (display‑only)
 function applyInlineCommentBoxes(root: HTMLElement) {
   const html = root.innerHTML;
   const replaced = html.replace(
@@ -21,52 +21,86 @@ function applyInlineCommentBoxes(root: HTMLElement) {
 
 // For counts, strip comment markers from plain text
 function stripInlineCommentMarkers(text: string): string {
-  return text.replace(/\/\/[\s\S]*?\/\/\s*/g, "");
+  return text.replace(/\/\/[^]*?\/\/\s*/g, "");
 }
 
-/** 
+/**
  * Aggressively enforce LTR and remove anything that can reverse glyph/word order.
  * This checks the editor and every ancestor up to <body>.
  */
 function forceRealLTR(el: HTMLElement | null) {
   let cur: HTMLElement | null = el;
   while (cur) {
-    // Remove dir attribute (just in case)
     if (cur.hasAttribute("dir")) cur.removeAttribute("dir");
-
-    // Sanitize inline styles that can reverse direction
-    const style = cur.style;
+    const style = (cur as HTMLElement).style;
     if (style) {
-      // Remove explicit RTL/bidi overrides
       if (style.direction) style.removeProperty("direction");
       if (style.unicodeBidi) style.removeProperty("unicode-bidi");
       if (style.writingMode) style.removeProperty("writing-mode");
-
-      // Kill flip transforms (scaleX(-1) or matrix with -1 on xx)
       const t = style.transform || "";
-      if (t && (/scaleX\(\s*-\s*1\s*\)/i.test(t) || /matrix\(\s*-?1[, ]\s*0[, ]\s*0[, ]\s*1/i.test(t))) {
+      if (
+        t &&
+        (/scaleX\(\s*-\s*1\s*\)/i.test(t) ||
+          /matrix\(\s*-?1[, ]\s*0[, ]\s*0[, ]\s*1/i.test(t))
+      ) {
         style.removeProperty("transform");
       }
     }
-
-    // Also neutralize computed (stylesheet) values by applying inline !important overrides on the editor root
     cur = cur.parentElement;
   }
-
   if (el) {
-    // Apply strong, explicit LTR on the editor surface
+    // Explicitly set the container dir and class to LTR after stripping styles
     el.setAttribute("dir", "ltr");
-    // Inline !important overrides via CSS class (defined below)
     el.classList.add("md-editor--ltr");
   }
 }
 
-/* ---------- Component ---------- */
+/**
+ * Remove bidi artifacts inside the editor content.
+ */
+function sanitizeBidiArtifacts(root: HTMLElement) {
+  // Remove explicit bidi attributes or styles that could flip direction
+  root.querySelectorAll<HTMLElement>("[dir]").forEach((el) => el.removeAttribute("dir"));
+  root.querySelectorAll<HTMLElement>("[style]").forEach((el) => {
+    const style = el.style;
+    let changed = false;
+    if (style.direction) {
+      style.removeProperty("direction");
+      changed = true;
+    }
+    if (style.unicodeBidi) {
+      style.removeProperty("unicode-bidi");
+      changed = true;
+    }
+    if (style.writingMode) {
+      style.removeProperty("writing-mode");
+      changed = true;
+    }
+    const t = style.transform || "";
+    if (
+      t &&
+      (/scaleX\(\s*-\s*1\s*\)/i.test(t) ||
+        /matrix\(\s*-?1[, ]\s*0[, ]\s*0[, ]\s*1/i.test(t))
+    ) {
+      style.removeProperty("transform");
+      changed = true;
+    }
+    if (changed && !style.cssText.trim()) el.removeAttribute("style");
+  });
+  // Remove invisible directional control characters
+  const html = root.innerHTML;
+  const cleaned = html.replace(/[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g, "");
+  if (cleaned !== html) {
+    root.innerHTML = cleaned;
+  }
+}
 
 export default function DocEditor() {
   const s = useSnapshot(state);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const autosaveRef = useRef<number | undefined>(undefined);
+  // Timer used to debounce state updates during typing
+  const typingTimerRef = useRef<number | null>(null);
 
   /* Autosave */
   useEffect(() => {
@@ -81,16 +115,17 @@ export default function DocEditor() {
     };
   }, []);
 
-  /* Lock LTR on mount */
+  /* Initialise editor content when a new doc is loaded */
   useEffect(() => {
     if (editorRef.current) {
+      // Directly mutate the DOM once when switching docs; don't let React control the value
+      editorRef.current.innerHTML = s.editor.md || "";
       forceRealLTR(editorRef.current);
-      // Ensure initial HTML can’t carry bidi artifacts
       sanitizeBidiArtifacts(editorRef.current);
     }
-  }, []);
+  }, [s.currentDocId]);
 
-  // In case a parent container toggles CSS at runtime (themes), re-enforce LTR
+  // Re-enforce LTR periodically in case parent themes flip styles
   useEffect(() => {
     const handle = window.setInterval(() => {
       if (editorRef.current) forceRealLTR(editorRef.current);
@@ -117,18 +152,16 @@ export default function DocEditor() {
     if (editorRef.current) {
       forceRealLTR(editorRef.current);
       sanitizeBidiArtifacts(editorRef.current);
+      // Immediately persist state after formatting operations
       state.editor.md = editorRef.current.innerHTML;
     }
   };
-
   const onBold = () => exec("bold");
   const onItalic = () => exec("italic");
   const onUnderline = () => exec("underline");
   const onStrike = () => exec("strikeThrough");
   const onHighlight = (hex: string) => exec("backColor", hex);
   const onColor = (hex: string) => exec("foreColor", hex);
-
-  // Don’t use justify* commands; set container alignment only
   const onAlign = (align: "left" | "center" | "right") => {
     if (!editorRef.current) return;
     editorRef.current.style.textAlign = align;
@@ -136,7 +169,6 @@ export default function DocEditor() {
     sanitizeBidiArtifacts(editorRef.current);
     state.editor.md = editorRef.current.innerHTML;
   };
-
   const onFontChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     document.execCommand("fontName", false, e.target.value);
     if (editorRef.current) {
@@ -145,25 +177,24 @@ export default function DocEditor() {
       state.editor.md = editorRef.current.innerHTML;
     }
   };
-
   const onFontSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const px = Math.max(8, Math.min(72, parseInt(e.target.value || "14", 10)));
     document.execCommand("styleWithCSS", false, "true");
     document.execCommand("fontSize", false, "4");
     if (editorRef.current) {
       const el = editorRef.current;
+      // Replace deprecated <font size> with spans and apply pixel font sizes
       el.querySelectorAll("font[size]").forEach((f) => {
         const span = document.createElement("span");
         span.style.fontSize = `${px}px`;
-        span.innerHTML = f.innerHTML;
-        f.replaceWith(span);
+        span.innerHTML = (f as HTMLElement).innerHTML;
+        (f as HTMLElement).replaceWith(span);
       });
       forceRealLTR(el);
       sanitizeBidiArtifacts(el);
       state.editor.md = el.innerHTML;
     }
   };
-
   const onLineHeightChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     if (editorRef.current) {
       editorRef.current.style.lineHeight = String(parseFloat(e.target.value) || 1.6);
@@ -172,14 +203,16 @@ export default function DocEditor() {
       state.editor.md = editorRef.current.innerHTML;
     }
   };
-
+  const flushTyping = () => {
+    // Persist the content of the editor into application state and autosave
+    if (!editorRef.current) return;
+    forceRealLTR(editorRef.current);
+    sanitizeBidiArtifacts(editorRef.current);
+    state.editor.md = editorRef.current.innerHTML;
+  };
   const onBlur = async () => {
-    if (editorRef.current) {
-      forceRealLTR(editorRef.current);
-      sanitizeBidiArtifacts(editorRef.current);
-      applyInlineCommentBoxes(editorRef.current);
-      state.editor.md = editorRef.current.innerHTML;
-    }
+    // When leaving the editor, flush any pending changes immediately
+    flushTyping();
     if (!state.currentDocId) return;
     await saveDoc(state.projectPath, state.currentDocId, state.editor.md);
     state.editor.lastSaved = Date.now();
@@ -202,15 +235,28 @@ export default function DocEditor() {
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <label>Font:</label>
           <select defaultValue="Arial" onChange={onFontChange}>
-            {["Arial", "Georgia", "Courier New", "Times New Roman", "Verdana"].map((f) => (
-              <option key={f} value={f}>{f}</option>
+            {[
+              "Arial",
+              "Georgia",
+              "Courier New",
+              "Times New Roman",
+              "Verdana",
+            ].map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
             ))}
           </select>
-
           <label>Size:</label>
-          <input type="number" min={8} max={72} defaultValue={14} onChange={onFontSizeChange} style={{ width: 60 }} />
+          <input
+            type="number"
+            min={8}
+            max={72}
+            defaultValue={14}
+            onChange={onFontSizeChange}
+            style={{ width: 60 }}
+          />
         </div>
-
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <button onClick={onBold} style={{ fontWeight: "bold" }}>B</button>
           <button onClick={onItalic} style={{ fontStyle: "italic" }}>I</button>
@@ -223,21 +269,23 @@ export default function DocEditor() {
             Color: <input type="color" defaultValue="#000000" onChange={(e) => onColor(e.target.value)} />
           </label>
         </div>
-
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <label>Align:</label>
           {(["left", "center", "right"] as const).map((algn) => (
-            <button key={algn} onClick={() => onAlign(algn)}>{algn[0].toUpperCase()}</button>
+            <button key={algn} onClick={() => onAlign(algn)}>
+              {algn[0].toUpperCase()}
+            </button>
           ))}
           <label>Line spacing:</label>
           <select defaultValue="1.6" onChange={onLineHeightChange}>
             {["1", "1.2", "1.4", "1.6", "2"].map((l) => (
-              <option key={l} value={l}>{l}</option>
+              <option key={l} value={l}>
+                {l}
+              </option>
             ))}
           </select>
         </div>
       </div>
-
       {/* Editable surface */}
       <div
         ref={editorRef}
@@ -246,11 +294,21 @@ export default function DocEditor() {
         dir="ltr"
         className="md-editor--ltr"
         onInput={() => {
-          if (editorRef.current) {
-            forceRealLTR(editorRef.current);
-            sanitizeBidiArtifacts(editorRef.current);
-            state.editor.md = editorRef.current.innerHTML;
+          // Debounce state updates during typing to avoid caret resets
+          if (!editorRef.current) return;
+          // Always keep the visual element LTR and sanitized as user types
+          forceRealLTR(editorRef.current);
+          sanitizeBidiArtifacts(editorRef.current);
+          // Clear the existing timer if a previous keypress occurred recently
+          if (typingTimerRef.current) {
+            clearTimeout(typingTimerRef.current);
+            typingTimerRef.current = null;
           }
+          // Schedule a flush shortly after typing stops (200ms)
+          typingTimerRef.current = window.setTimeout(() => {
+            flushTyping();
+            typingTimerRef.current = null;
+          }, 200) as unknown as number;
         }}
         onBlur={onBlur}
         style={{
@@ -267,14 +325,12 @@ export default function DocEditor() {
           lineHeight: "1.6",
         }}
         aria-label="Document editor"
-        dangerouslySetInnerHTML={{ __html: s.editor.md || "" }}
       />
-
       {/* Hard LTR + inline-comment style */}
       <style>{`
         .md-editor--ltr, .md-editor--ltr * {
           direction: ltr !important;
-          unicode-bidi: plaintext !important;
+          unicode-bidi: normal !important;
           writing-mode: horizontal-tb !important;
         }
         .md-editor--ltr {
@@ -291,7 +347,6 @@ export default function DocEditor() {
           color: #374151;
         }
       `}</style>
-
       {/* Counters */}
       <WordCounter
         count={wordCount}
@@ -303,29 +358,7 @@ export default function DocEditor() {
       {s.editor.showCharCount && (
         <WordCounter count={charCount} label="Characters" anchor="right" color="#f9a8d4" />
       )}
-
       <StickyNotes />
     </div>
   );
-}
-
-/** Remove bidi artifacts inside the editor content */
-function sanitizeBidiArtifacts(root: HTMLElement) {
-  // Remove dir attributes in descendants
-  root.querySelectorAll<HTMLElement>("[dir]").forEach((el) => el.removeAttribute("dir"));
-
-  // Remove inline bidi styles & flips in descendants
-  root.querySelectorAll<HTMLElement>("[style]").forEach((el) => {
-    const style = el.style;
-    let changed = false;
-    if (style.direction) { style.removeProperty("direction"); changed = true; }
-    if (style.unicodeBidi) { style.removeProperty("unicode-bidi"); changed = true; }
-    if (style.writingMode) { style.removeProperty("writing-mode"); changed = true; }
-    const t = style.transform || "";
-    if (t && (/scaleX\(\s*-\s*1\s*\)/i.test(t) || /matrix\(\s*-?1[, ]\s*0[, ]\s*0[, ]\s*1/i.test(t))) {
-      style.removeProperty("transform");
-      changed = true;
-    }
-    if (changed && !style.cssText.trim()) el.removeAttribute("style");
-  });
 }
